@@ -2111,6 +2111,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
         
         let screenData: Signal<PeerInfoScreenData, NoError>
         if self.isSettings {
+            let isDoubleBottomDecoy = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy
             self.notificationExceptions.set(.single(NotificationExceptionsList(peers: [:], settings: [:]))
             |> then(
                 context.engine.peers.notificationExceptionsList()
@@ -2118,19 +2119,24 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
             ))
             self.privacySettings.set(.single(nil) |> then(context.engine.privacy.requestAccountPrivacySettings() |> map(Optional.init)))
             self.archivedPacks.set(.single(nil) |> then(context.engine.stickers.archivedStickerPacks() |> map(Optional.init)))
-            self.twoStepAccessConfiguration.set(.single(nil) |> then(context.engine.auth.twoStepVerificationConfiguration()
-            |> map { value -> TwoStepVerificationAccessConfiguration? in
-                return TwoStepVerificationAccessConfiguration(configuration: value, password: nil)
-            }))
-            
-            self.twoStepAuthData.set(.single(nil)
-            |> then(
-                context.engine.auth.twoStepAuthData()
-                |> map(Optional.init)
-                |> `catch` { _ -> Signal<TwoStepAuthData?, NoError> in
-                    return .single(nil)
-                }
-            ))
+            if isDoubleBottomDecoy {
+                self.twoStepAccessConfiguration.set(.single(nil))
+                self.twoStepAuthData.set(.single(nil))
+            } else {
+                self.twoStepAccessConfiguration.set(.single(nil) |> then(context.engine.auth.twoStepVerificationConfiguration()
+                |> map { value -> TwoStepVerificationAccessConfiguration? in
+                    return TwoStepVerificationAccessConfiguration(configuration: value, password: nil)
+                }))
+
+                self.twoStepAuthData.set(.single(nil)
+                |> then(
+                    context.engine.auth.twoStepAuthData()
+                    |> map(Optional.init)
+                    |> `catch` { _ -> Signal<TwoStepAuthData?, NoError> in
+                        return .single(nil)
+                    }
+                ))
+            }
             
             let hasPassport = self.twoStepAuthData.get()
             |> map { data -> Bool in

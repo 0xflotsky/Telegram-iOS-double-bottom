@@ -315,7 +315,12 @@ public final class GlobalControlPanelsContext {
             }
             
             if chatListNotices {
-                let twoStepData: Signal<TwoStepVerificationConfiguration?, NoError> = .single(nil) |> then(context.engine.auth.twoStepVerificationConfiguration() |> map(Optional.init))
+                let twoStepData: Signal<TwoStepVerificationConfiguration?, NoError>
+                if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                    twoStepData = .single(nil)
+                } else {
+                    twoStepData = .single(nil) |> then(context.engine.auth.twoStepVerificationConfiguration() |> map(Optional.init))
+                }
                 
                 let accountFreezeConfiguration = (context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ApplicationSpecificPreference(key: PreferencesKeys.appConfiguration))
                                                   |> map { view -> AppConfiguration in

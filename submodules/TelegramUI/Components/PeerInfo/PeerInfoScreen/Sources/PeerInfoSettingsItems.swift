@@ -81,6 +81,8 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     }
     
     if let settings = data.globalSettings {
+        let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+        let usesTelegramCloudPassword = policyMode == .ordinary || policyMode == .primary
         if settings.premiumGracePeriod {
             items[.phone]!.append(PeerInfoScreenInfoItem(id: 0, title: "Your access to Telegram Premium will expire soon!", text: .markdown("Unfortunately, your latest payment didn't come through. To keep your access to exclusive features, please renew the subscription."), isWarning: true, linkAction: nil))
             items[.phone]!.append(PeerInfoScreenActionItem(id: 1, text: "Restore Subscription", action: {
@@ -99,7 +101,7 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
             items[.phone]!.append(PeerInfoScreenActionItem(id: 2, text: presentationData.strings.Settings_ChangePhoneNumber, action: {
                 interaction.openSettings(.phoneNumber)
             }))
-        } else if settings.suggestPasswordConfirmation {
+        } else if settings.suggestPasswordConfirmation && usesTelegramCloudPassword {
             items[.phone]!.append(PeerInfoScreenInfoItem(id: 0, title: presentationData.strings.Settings_CheckPasswordTitle, text: .markdown(presentationData.strings.Settings_CheckPasswordText), linkAction: { _ in
             }))
             items[.phone]!.append(PeerInfoScreenActionItem(id: 1, text: presentationData.strings.Settings_KeepPassword, action: {
@@ -108,7 +110,7 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
             items[.phone]!.append(PeerInfoScreenActionItem(id: 2, text: presentationData.strings.Settings_TryEnterPassword, action: {
                 interaction.openSettings(.rememberPassword)
             }))
-        } else if settings.suggestPasswordSetup {
+        } else if settings.suggestPasswordSetup && usesTelegramCloudPassword {
             items[.phone]!.append(PeerInfoScreenInfoItem(id: 0, title: presentationData.strings.Settings_SuggestSetupPasswordTitle, text: .markdown(presentationData.strings.Settings_SuggestSetupPasswordText), linkAction: { _ in
             }))
             items[.phone]!.append(PeerInfoScreenActionItem(id: 2, text: presentationData.strings.Settings_SuggestSetupPasswordAction, action: {

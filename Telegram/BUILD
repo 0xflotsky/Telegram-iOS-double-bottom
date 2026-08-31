@@ -316,6 +316,13 @@ filegroup(
     ]),
 )
 
+filegroup(
+    name = "BlackDefaultAppIcon",
+    srcs = glob([
+        "Telegram-iOS/AppIcons.xcassets/BlackIcon.appiconset/**/*",
+    ], exclude = ["Telegram-iOS/AppIcons.xcassets/BlackIcon.appiconset/**/.*"]),
+)
+
 alternate_icon_folders = [
     "BlackIcon",
     "BlackClassicIcon",
@@ -1777,7 +1784,7 @@ ios_application(
         ":RequiredDeviceCapabilitiesPlist",
         ":UrlTypesInfoPlist",
     ],
-    app_icons = [ ":{}_icon".format(name) for name in composer_icon_folders ],
+    app_icons = [":BlackDefaultAppIcon"],
     alternate_icons = [
         ":{}".format(name) for name in alternate_icon_folders
     ],

@@ -151,6 +151,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public let accountManager: AccountManager<TelegramAccountManagerTypes>
     public let doubleBottomContext: DoubleBottomContext
     public let doubleBottomCredentialStore: DoubleBottomCredentialStore
+    public let doubleBottomPrivateStore: DoubleBottomPrivateStore
     private let doubleBottomSecureExitCoordinator: DoubleBottomSecureExitCoordinator
     public let appLockContext: AppLockContext
     public var notificationController: NotificationContainerController? {
@@ -317,9 +318,11 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.accountManager = accountManager
         let doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
         let doubleBottomCredentialStore = DoubleBottomCredentialStore()
+        let doubleBottomPrivateStore = DoubleBottomPrivateStore(basePath: basePath)
         self.doubleBottomContext = doubleBottomContext
         self.doubleBottomCredentialStore = doubleBottomCredentialStore
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore)
+        self.doubleBottomPrivateStore = doubleBottomPrivateStore
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

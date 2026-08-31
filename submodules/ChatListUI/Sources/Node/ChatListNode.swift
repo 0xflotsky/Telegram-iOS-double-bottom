@@ -2223,7 +2223,7 @@ public final class ChatListNode: ListViewImpl {
             
             let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
             let doubleBottomUIState = context.sharedContext.doubleBottomProfileUIState.currentDecoyState
-            let selectedDecoyFolderPeerIds: Set<PeerId>? = doubleBottomUIState.selectedFolderId.flatMap { selectedFolderId in
+            let selectedDecoyFolderPeerIds: Set<EnginePeer.Id>? = doubleBottomUIState.selectedFolderId.flatMap { selectedFolderId in
                 return doubleBottomUIState.folders.first(where: { $0.id == selectedFolderId })?.peerIds
             }
             var isEmpty = true
@@ -2533,7 +2533,7 @@ public final class ChatListNode: ListViewImpl {
             if isEmpty {
                 entries = [.HeaderEntry]
             } else if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy {
-                let pinnedIndices = doubleBottomUIState.pinnedPeerIds.enumerated().reduce(into: [PeerId: Int]()) { result, item in
+                let pinnedIndices = doubleBottomUIState.pinnedPeerIds.enumerated().reduce(into: [EnginePeer.Id: Int]()) { result, item in
                     if result[item.element] == nil {
                         result[item.element] = item.offset
                     }

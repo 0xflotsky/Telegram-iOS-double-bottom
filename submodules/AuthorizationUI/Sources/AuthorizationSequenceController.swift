@@ -1002,7 +1002,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
         return self.view.window!
     }
     
-    private func passwordEntryController(hint: String, number: String, suggestReset: Bool, syncContacts: Bool) -> AuthorizationSequencePasswordEntryController {
+    private func passwordEntryController(hint: String, number: String?, suggestReset: Bool, syncContacts: Bool) -> AuthorizationSequencePasswordEntryController {
         var currentController: AuthorizationSequencePasswordEntryController?
         for c in self.viewControllers {
             if let c = c as? AuthorizationSequencePasswordEntryController {
@@ -1023,7 +1023,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                 let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(isTestingEnvironment: strongSelf.account.testingEnvironment, masterDatacenterId: strongSelf.account.masterDatacenterId, contents: .phoneEntry(countryCode: countryCode, number: ""))).startStandalone()
             })
         }
-        if let reentryContext = self.doubleBottomReentryContext(for: number) {
+        if let number, let reentryContext = self.doubleBottomReentryContext(for: number) {
             controller.didForgotWithNoRecovery = true
             controller.loginWithPassword = { [weak self, weak controller] password in
                 guard let self else {

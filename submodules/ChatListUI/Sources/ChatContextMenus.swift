@@ -113,7 +113,12 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
             context.engine.peers.getPinnedItemIds(location: location)
         )
         |> mapToSignal { filters, pinnedItemIds -> Signal<[ContextMenuItem], NoError> in
-            let isPinned = pinnedItemIds.contains(.peer(peerId))
+            let isPinned: Bool
+            if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                isPinned = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.pinnedPeerIds.contains(peerId)
+            } else {
+                isPinned = pinnedItemIds.contains(.peer(peerId))
+            }
             
             let renderedPeer = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.RenderedPeer(id: peerId))
             
@@ -145,17 +150,33 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                             break
                         case .recentSearch:
                             items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_RemoveFromRecents, textColor: .destructive, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Clear"), color: theme.contextMenu.destructiveColor) }, action: { _, f in
-                                let _ = (context.engine.peers.removeRecentlySearchedPeer(peerId: peerId)
-                                |> deliverOnMainQueue).startStandalone(completed: {
+                                let remove: Signal<Void, NoError>
+                                if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                                    remove = context.sharedContext.doubleBottomProfileUIState.removeRecentPeerId(peerId)
+                                } else {
+                                    remove = context.engine.peers.removeRecentlySearchedPeer(peerId: peerId)
+                                }
+                                let _ = (remove |> deliverOnMainQueue).startStandalone(completed: {
                                     f(.default)
                                 })
                             })))
                             items.append(.separator)
                         case .search:
-                            if recentlySearchedPeers.contains(where: { $0.peer.peerId == peerId }) {
+                            let isRecentlySearched: Bool
+                            if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                                isRecentlySearched = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.recentPeerIds.contains(peerId)
+                            } else {
+                                isRecentlySearched = recentlySearchedPeers.contains(where: { $0.peer.peerId == peerId })
+                            }
+                            if isRecentlySearched {
                                 items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_RemoveFromRecents, textColor: .destructive, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Clear"), color: theme.contextMenu.destructiveColor) }, action: { _, f in
-                                    let _ = (context.engine.peers.removeRecentlySearchedPeer(peerId: peerId)
-                                    |> deliverOnMainQueue).startStandalone(completed: {
+                                    let remove: Signal<Void, NoError>
+                                    if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                                        remove = context.sharedContext.doubleBottomProfileUIState.removeRecentPeerId(peerId)
+                                    } else {
+                                        remove = context.engine.peers.removeRecentlySearchedPeer(peerId: peerId)
+                                    }
+                                    let _ = (remove |> deliverOnMainQueue).startStandalone(completed: {
                                         f(.default)
                                     })
                                 })))

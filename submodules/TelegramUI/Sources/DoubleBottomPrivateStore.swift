@@ -4,28 +4,64 @@ import CryptoKit
 import SwiftSignalKit
 
 public struct DoubleBottomPrivateState: Codable, Equatable {
-    public var decoyAllowedPeerIds: Set<Int64>
-
-    public static var empty: DoubleBottomPrivateState {
-        return DoubleBottomPrivateState(decoyAllowedPeerIds: Set())
+    public struct LocalFolder: Codable, Equatable {
+        public var id: String
+        public var title: String
+        public var peerIds: Set<Int64>
     }
 
-    public init(decoyAllowedPeerIds: Set<Int64>) {
+    public var ownerPeerId: Int64?
+    public var decoyAllowedPeerIds: Set<Int64>
+    public var decoySelectedFolderId: String?
+    public var decoyFolders: [LocalFolder]
+    public var decoyPinnedPeerIds: [Int64]
+    public var decoyRecentPeerIds: [Int64]
+    public var decoySortOrder: Int32
+
+    public static var empty: DoubleBottomPrivateState {
+        return DoubleBottomPrivateState(ownerPeerId: nil, decoyAllowedPeerIds: Set(), decoySelectedFolderId: nil, decoyFolders: [], decoyPinnedPeerIds: [], decoyRecentPeerIds: [], decoySortOrder: 0)
+    }
+
+    public init(ownerPeerId: Int64? = nil, decoyAllowedPeerIds: Set<Int64>, decoySelectedFolderId: String? = nil, decoyFolders: [LocalFolder] = [], decoyPinnedPeerIds: [Int64] = [], decoyRecentPeerIds: [Int64] = [], decoySortOrder: Int32 = 0) {
+        self.ownerPeerId = ownerPeerId
         self.decoyAllowedPeerIds = decoyAllowedPeerIds
+        self.decoySelectedFolderId = decoySelectedFolderId
+        self.decoyFolders = decoyFolders
+        self.decoyPinnedPeerIds = decoyPinnedPeerIds
+        self.decoyRecentPeerIds = decoyRecentPeerIds
+        self.decoySortOrder = decoySortOrder
     }
 
     private enum CodingKeys: String, CodingKey {
+        case ownerPeerId = "o"
         case decoyAllowedPeerIds = "a"
+        case decoySelectedFolderId = "f"
+        case decoyFolders = "fs"
+        case decoyPinnedPeerIds = "p"
+        case decoyRecentPeerIds = "r"
+        case decoySortOrder = "s"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ownerPeerId = try container.decodeIfPresent(Int64.self, forKey: .ownerPeerId)
         self.decoyAllowedPeerIds = try container.decodeIfPresent(Set<Int64>.self, forKey: .decoyAllowedPeerIds) ?? Set()
+        self.decoySelectedFolderId = try container.decodeIfPresent(String.self, forKey: .decoySelectedFolderId)
+        self.decoyFolders = try container.decodeIfPresent([LocalFolder].self, forKey: .decoyFolders) ?? []
+        self.decoyPinnedPeerIds = try container.decodeIfPresent([Int64].self, forKey: .decoyPinnedPeerIds) ?? []
+        self.decoyRecentPeerIds = try container.decodeIfPresent([Int64].self, forKey: .decoyRecentPeerIds) ?? []
+        self.decoySortOrder = try container.decodeIfPresent(Int32.self, forKey: .decoySortOrder) ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(self.ownerPeerId, forKey: .ownerPeerId)
         try container.encode(self.decoyAllowedPeerIds, forKey: .decoyAllowedPeerIds)
+        try container.encodeIfPresent(self.decoySelectedFolderId, forKey: .decoySelectedFolderId)
+        try container.encode(self.decoyFolders, forKey: .decoyFolders)
+        try container.encode(self.decoyPinnedPeerIds, forKey: .decoyPinnedPeerIds)
+        try container.encode(self.decoyRecentPeerIds, forKey: .decoyRecentPeerIds)
+        try container.encode(self.decoySortOrder, forKey: .decoySortOrder)
     }
 }
 
@@ -90,6 +126,32 @@ public final class DoubleBottomPrivateStore {
                 self.revision += 1
                 self.revisionPromise.set(self.revision)
                 subscriber.putNext(())
+                subscriber.putCompletion()
+            } catch let error as DoubleBottomPrivateStoreError {
+                subscriber.putError(error)
+            } catch {
+                subscriber.putError(.corruptData)
+            }
+            return EmptyDisposable
+        }
+        |> runOn(self.queue)
+    }
+
+    public func claimOwner(peerId: Int64) -> Signal<Bool, DoubleBottomPrivateStoreError> {
+        return Signal { subscriber in
+            do {
+                var state = try self.loadState()
+                if let ownerPeerId = state.ownerPeerId {
+                    subscriber.putNext(ownerPeerId == peerId)
+                    subscriber.putCompletion()
+                    return EmptyDisposable
+                }
+
+                state.ownerPeerId = peerId
+                try self.storeState(state)
+                self.revision += 1
+                self.revisionPromise.set(self.revision)
+                subscriber.putNext(true)
                 subscriber.putCompletion()
             } catch let error as DoubleBottomPrivateStoreError {
                 subscriber.putError(error)

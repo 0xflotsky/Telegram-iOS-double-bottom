@@ -1368,6 +1368,7 @@ public protocol SharedAccountContext: AnyObject {
     var mainWindow: Window1? { get }
     var accountManager: AccountManager<TelegramAccountManagerTypes> { get }
     var doubleBottomPeerPolicy: DoubleBottomPeerPolicy { get }
+    var doubleBottomProfileUIState: DoubleBottomProfileUIStateContext { get }
     var appLockContext: AppLockContext { get }
     
     var currentPresentationData: Atomic<PresentationData> { get }

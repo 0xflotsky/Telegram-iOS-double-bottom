@@ -438,7 +438,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         
         self.badgeDisposable = (combineLatest(renderedTotalUnreadCount(accountManager: context.sharedContext.accountManager, engine: context.engine), self.presentationDataValue.get(), context.sharedContext.doubleBottomPeerPolicy.updates) |> deliverOnMainQueue).startStrict(next: { [weak self] count, presentationData, _ in
             if let strongSelf = self {
-                if context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary || count.0 == 0 {
+                let mode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                if (mode != .ordinary && mode != .primary) || count.0 == 0 {
                     strongSelf.tabBarItem.badgeValue = ""
                 } else {
                     strongSelf.tabBarItem.badgeValue = compactNumericCountString(Int(count.0), decimalSeparator: presentationData.dateTimeFormat.decimalSeparator)
@@ -4008,7 +4009,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             strongSelf.isPremium = isPremium ?? false
             
             var (_, items) = countAndFilterItems
-            if strongSelf.context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
+            let mode = strongSelf.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: strongSelf.context.account.peerId)
+            if mode != .ordinary && mode != .primary {
                 items = items.filter { item in
                     if case .allChats = item.0 {
                         return true

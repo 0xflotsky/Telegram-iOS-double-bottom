@@ -141,26 +141,28 @@ final class DoubleBottomSecureExitCoordinator {
     private let credentialStore: DoubleBottomCredentialStore
     private let privateStore: DoubleBottomPrivateStore
     private let policy: DoubleBottomPolicy
+    private let profileUIState: DoubleBottomProfileUIStateContextImpl
     private var accessStateDisposable: Disposable?
     private let verificationDisposable = MetaDisposable()
     private let applyProfileDisposable = MetaDisposable()
 
-    init(window: Window1?, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy) {
+    init(window: Window1?, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy, profileUIState: DoubleBottomProfileUIStateContextImpl) {
         self.window = window
         self.context = context
         self.credentialStore = credentialStore
         self.privateStore = privateStore
         self.policy = policy
+        self.profileUIState = profileUIState
         self.coveringView.unlock = { [weak self] password in
             self?.verify(password: password)
         }
-        self.accessStateDisposable = context.accessState.startStrict(next: { [weak self] state in
+        self.accessStateDisposable = policy.activeMode.startStrict(next: { [weak self] mode in
             guard let self, let window = self.window else {
                 return
             }
 
-            switch state {
-            case .unlocked:
+            switch mode {
+            case .ordinary, .primary, .decoy:
                 if window.privacyCoveringView === self.coveringView {
                     window.privacyCoveringView = nil
                 }
@@ -171,6 +173,7 @@ final class DoubleBottomSecureExitCoordinator {
                     window.privacyCoveringView = self.coveringView
                 }
                 self.privateStore.clearDecryptedState()
+                self.profileUIState.clearSensitiveState()
             }
         })
     }

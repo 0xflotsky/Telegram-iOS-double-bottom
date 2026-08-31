@@ -7,6 +7,7 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
     private struct Snapshot: Equatable {
         let profile: DoubleBottomProfile
         let accessState: DoubleBottomAccessState
+        let ownerPeerId: Int64?
         let decoyAllowedPeerIds: Set<Int64>
         let isPrivateStoreAvailable: Bool
     }
@@ -14,34 +15,17 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
     private let privateStore: DoubleBottomPrivateStore
     private let snapshotValue = Atomic<Snapshot?>(value: nil)
     private let snapshotPromise = ValuePromise<Snapshot>(ignoreRepeated: true)
+    private let activeAccountPeerIdValue = Atomic<PeerId?>(value: nil)
+    private let activeAccountPeerIdPromise = ValuePromise<PeerId?>(nil, ignoreRepeated: true)
     private var snapshotDisposable: Disposable?
 
-    public var currentMode: DoubleBottomPeerPolicyMode {
-        return self.snapshotValue.with { snapshot in
-            guard let snapshot, snapshot.accessState == .unlocked else {
-                return .secureExited
+    var activeMode: Signal<DoubleBottomPeerPolicyMode, NoError> {
+        return combineLatest(self.snapshotPromise.get(), self.activeAccountPeerIdPromise.get())
+        |> map { snapshot, accountPeerId in
+            guard let accountPeerId else {
+                return .ordinary
             }
-            switch snapshot.profile {
-            case .primary:
-                return .primary
-            case .decoy:
-                return .decoy
-            }
-        }
-    }
-
-    public var mode: Signal<DoubleBottomPeerPolicyMode, NoError> {
-        return self.snapshotPromise.get()
-        |> map { snapshot in
-            if snapshot.accessState == .secureExited {
-                return .secureExited
-            }
-            switch snapshot.profile {
-            case .primary:
-                return .primary
-            case .decoy:
-                return .decoy
-            }
+            return Self.mode(snapshot: snapshot, accountPeerId: accountPeerId)
         }
         |> distinctUntilChanged
     }
@@ -66,32 +50,24 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
             privateStore.updates
         )
         |> mapToSignal { profile, accessState, _ -> Signal<Snapshot, NoError> in
-            switch profile {
-            case .primary:
-                return .single(Snapshot(
-                    profile: .primary,
+            return privateStore.load()
+            |> map { state in
+                return Snapshot(
+                    profile: profile,
                     accessState: accessState,
-                    decoyAllowedPeerIds: Set(),
+                    ownerPeerId: state.ownerPeerId,
+                    decoyAllowedPeerIds: state.decoyAllowedPeerIds,
                     isPrivateStoreAvailable: true
+                )
+            }
+            |> `catch` { _ -> Signal<Snapshot, NoError> in
+                return .single(Snapshot(
+                    profile: profile,
+                    accessState: accessState,
+                    ownerPeerId: nil,
+                    decoyAllowedPeerIds: Set(),
+                    isPrivateStoreAvailable: false
                 ))
-            case .decoy:
-                return privateStore.load()
-                |> map { state in
-                    return Snapshot(
-                        profile: .decoy,
-                        accessState: accessState,
-                        decoyAllowedPeerIds: state.decoyAllowedPeerIds,
-                        isPrivateStoreAvailable: true
-                    )
-                }
-                |> `catch` { _ -> Signal<Snapshot, NoError> in
-                    return .single(Snapshot(
-                        profile: .decoy,
-                        accessState: accessState,
-                        decoyAllowedPeerIds: Set(),
-                        isPrivateStoreAvailable: false
-                    ))
-                }
             }
         }
         |> distinctUntilChanged
@@ -110,28 +86,99 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         self.snapshotDisposable?.dispose()
     }
 
-    public func canAccess(peerId: PeerId) -> Bool {
+    public func currentMode(accountPeerId: PeerId) -> DoubleBottomPeerPolicyMode {
         return self.snapshotValue.with { snapshot in
-            guard let snapshot, snapshot.accessState == .unlocked else {
+            guard let snapshot else {
+                return .secureExited
+            }
+            return Self.mode(snapshot: snapshot, accountPeerId: accountPeerId)
+        }
+    }
+
+    public func mode(accountPeerId: PeerId) -> Signal<DoubleBottomPeerPolicyMode, NoError> {
+        return self.snapshotPromise.get()
+        |> map { snapshot in
+            return Self.mode(snapshot: snapshot, accountPeerId: accountPeerId)
+        }
+        |> distinctUntilChanged
+    }
+
+    public func isOwner(accountPeerId: PeerId) -> Bool {
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot, snapshot.isPrivateStoreAvailable, let ownerPeerId = snapshot.ownerPeerId else {
                 return false
             }
-            switch snapshot.profile {
-            case .primary:
+            return ownerPeerId == accountPeerId.toInt64()
+        }
+    }
+
+    public func canAccess(accountPeerId: PeerId, peerId: PeerId) -> Bool {
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot else {
+                return false
+            }
+            switch Self.mode(snapshot: snapshot, accountPeerId: accountPeerId) {
+            case .ordinary, .primary:
                 return true
+            case .secureExited:
+                return false
             case .decoy:
-                return snapshot.decoyAllowedPeerIds.contains(peerId.toInt64())
+                return peerId == accountPeerId || snapshot.decoyAllowedPeerIds.contains(peerId.toInt64())
             }
         }
     }
 
-    public func filterPeers<T>(_ peers: [T], peerId: (T) -> PeerId) -> [T] {
-        return peers.filter { self.canAccess(peerId: peerId($0)) }
+    func setActiveAccountPeerId(_ peerId: PeerId?) {
+        let previous = self.activeAccountPeerIdValue.swap(peerId)
+        if previous != peerId {
+            self.activeAccountPeerIdPromise.set(peerId)
+        }
     }
 
-    public func setDecoyAllowedPeerIds(_ peerIds: Set<PeerId>) -> Signal<Void, DoubleBottomPrivateStoreError> {
+    private static func mode(snapshot: Snapshot, accountPeerId: PeerId) -> DoubleBottomPeerPolicyMode {
+        guard snapshot.isPrivateStoreAvailable else {
+            return .secureExited
+        }
+        guard let ownerPeerId = snapshot.ownerPeerId else {
+            return .ordinary
+        }
+        guard ownerPeerId == accountPeerId.toInt64() else {
+            return .ordinary
+        }
+        guard snapshot.accessState == .unlocked else {
+            return .secureExited
+        }
+        switch snapshot.profile {
+        case .primary:
+            return .primary
+        case .decoy:
+            return .decoy
+        }
+    }
+
+    public func filterPeers<T>(_ peers: [T], accountPeerId: PeerId, peerId: (T) -> PeerId) -> [T] {
+        return peers.filter { self.canAccess(accountPeerId: accountPeerId, peerId: peerId($0)) }
+    }
+
+    public func claimOwner(accountPeerId: PeerId) -> Signal<Bool, DoubleBottomPrivateStoreError> {
+        return self.privateStore.claimOwner(peerId: accountPeerId.toInt64())
+    }
+
+    public func setDecoyAllowedPeerIds(_ peerIds: Set<PeerId>, accountPeerId: PeerId) -> Signal<Void, DoubleBottomPrivateStoreError> {
+        guard self.isOwner(accountPeerId: accountPeerId) else {
+            return .complete()
+        }
         let rawPeerIds = Set(peerIds.map { $0.toInt64() })
         return self.privateStore.update { state in
+            guard state.ownerPeerId == accountPeerId.toInt64() else {
+                return
+            }
             state.decoyAllowedPeerIds = rawPeerIds
+            state.decoyPinnedPeerIds.removeAll(where: { !rawPeerIds.contains($0) })
+            state.decoyRecentPeerIds.removeAll(where: { !rawPeerIds.contains($0) })
+            for index in state.decoyFolders.indices {
+                state.decoyFolders[index].peerIds = state.decoyFolders[index].peerIds.intersection(rawPeerIds)
+            }
         }
     }
 }

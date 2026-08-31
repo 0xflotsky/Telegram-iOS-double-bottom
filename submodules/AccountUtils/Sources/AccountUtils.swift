@@ -9,8 +9,10 @@ public let maximumPremiumNumberOfAccounts = 4
 
 public func activeAccountsAndPeers(context: AccountContext, includePrimary: Bool = false) -> Signal<((AccountContext, EnginePeer)?, [(AccountContext, EnginePeer, Int32)]), NoError> {
     let sharedContext = context.sharedContext
-    return context.sharedContext.activeAccountContexts
-    |> mapToSignal { primary, activeAccounts, _ -> Signal<((AccountContext, EnginePeer)?, [(AccountContext, EnginePeer, Int32)]), NoError> in
+    return combineLatest(context.sharedContext.activeAccountContexts, context.sharedContext.doubleBottomPeerPolicy.updates)
+    |> mapToSignal { activeAccountContexts, _ -> Signal<((AccountContext, EnginePeer)?, [(AccountContext, EnginePeer, Int32)]), NoError> in
+        let (primary, activeAccounts, _) = activeAccountContexts
+        let currentMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
         var accounts: [Signal<(AccountContext, EnginePeer, Int32)?, NoError>] = []
         func accountWithPeer(_ context: AccountContext) -> Signal<(AccountContext, EnginePeer, Int32)?, NoError> {
             return combineLatest(context.account.postbox.peerView(id: context.account.peerId), renderedTotalUnreadCount(accountManager: sharedContext.accountManager, engine: context.engine))
@@ -35,6 +37,13 @@ public func activeAccountsAndPeers(context: AccountContext, includePrimary: Bool
             }
         }
         for (_, context, _) in activeAccounts {
+            if currentMode == .primary || currentMode == .decoy || currentMode == .secureExited {
+                guard context.account.peerId == primary?.account.peerId else {
+                    continue
+                }
+            } else if sharedContext.doubleBottomPeerPolicy.isOwner(accountPeerId: context.account.peerId) {
+                continue
+            }
             accounts.append(accountWithPeer(context))
         }
         

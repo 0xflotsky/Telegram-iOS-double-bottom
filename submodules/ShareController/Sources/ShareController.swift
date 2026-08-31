@@ -305,18 +305,19 @@ extension ShareControllerEnvironment {
         return environment.sharedContext.doubleBottomPeerPolicy.updates
     }
 
-    func doubleBottomCanAccess(peerId: EnginePeer.Id) -> Bool {
+    func doubleBottomCanAccess(accountPeerId: EnginePeer.Id, peerId: EnginePeer.Id) -> Bool {
         guard let environment = self as? ShareControllerAppEnvironment else {
             return true
         }
-        return environment.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerId)
+        return environment.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peerId)
     }
 
-    var doubleBottomIsPrimary: Bool {
+    func doubleBottomUsesOrdinaryState(accountPeerId: EnginePeer.Id) -> Bool {
         guard let environment = self as? ShareControllerAppEnvironment else {
             return true
         }
-        return environment.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+        let mode = environment.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId)
+        return mode == .ordinary || mode == .primary
     }
 }
 
@@ -421,10 +422,14 @@ public final class ShareController: ViewController {
             segmentedValues: segmentedValues,
             externalShare: externalShare,
             immediateExternalShare: immediateExternalShare,
-            switchableAccounts: switchableAccounts.map { info in
+            switchableAccounts: switchableAccounts.compactMap { info in
+                let currentMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                if currentMode != .ordinary || context.sharedContext.doubleBottomPeerPolicy.isOwner(accountPeerId: info.account.peerId) {
+                    return nil
+                }
                 return ShareControllerSwitchableAccount(account: ShareControllerAppAccountContext(context: context.sharedContext.makeTempAccountContext(account: info.account)), peer: info.peer)
             },
-            immediatePeerId: immediatePeerId.flatMap { context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0) ? $0 : nil },
+            immediatePeerId: immediatePeerId.flatMap { context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: $0) ? $0 : nil },
             updatedPresentationData: updatedPresentationData,
             forceTheme: forceTheme,
             forcedActionTitle: forcedActionTitle,
@@ -441,7 +446,7 @@ public final class ShareController: ViewController {
         self.externalShare = externalShare
         self.immediateExternalShare = immediateExternalShare
         self.switchableAccounts = switchableAccounts
-        self.immediatePeerId = immediatePeerId.flatMap { environment.doubleBottomCanAccess(peerId: $0) ? $0 : nil }
+        self.immediatePeerId = immediatePeerId.flatMap { environment.doubleBottomCanAccess(accountPeerId: currentContext.accountPeerId, peerId: $0) ? $0 : nil }
         self.fromForeignApp = fromForeignApp
         self.segmentedValues = segmentedValues
         self.forceTheme = forceTheme
@@ -962,7 +967,7 @@ public final class ShareController: ViewController {
             guard let self else {
                 return .complete()
             }
-            guard peerIds.allSatisfy({ self.environment.doubleBottomCanAccess(peerId: $0) }) else {
+            guard peerIds.allSatisfy({ self.environment.doubleBottomCanAccess(accountPeerId: self.currentContext.accountPeerId, peerId: $0) }) else {
                 return .complete()
             }
             

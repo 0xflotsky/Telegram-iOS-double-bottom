@@ -3599,7 +3599,12 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
             }
             switch location {
             case .chatList, .forum:
-                let _ = context.engine.peers.addRecentlySearchedPeer(peerId: peer.id).startStandalone()
+                let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                if policyMode == .ordinary || policyMode == .primary {
+                    let _ = context.engine.peers.addRecentlySearchedPeer(peerId: peer.id).startStandalone()
+                } else if policyMode == .decoy {
+                    let _ = context.sharedContext.doubleBottomProfileUIState.addRecentPeerId(peer.id).startStandalone()
+                }
             case .savedMessagesChats:
                 break
             }
@@ -3927,16 +3932,19 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
 
                 mappedItems = mappedItems.filter { item in
                     if let peerId = item.doubleBottomPeerId {
-                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerId)
+                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId)
                     } else if case .addContact = item {
-                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                        let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                        return policyMode == .ordinary || policyMode == .primary
                     } else if case .messagePlaceholder = item {
-                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                        let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                        return policyMode == .ordinary || policyMode == .primary
                     } else {
                         return true
                     }
                 }
-                if context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
+                let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                if policyMode != .ordinary && policyMode != .primary {
                     let visibleMessageCount = Int32(clamping: mappedItems.reduce(into: 0) { count, item in
                         if case .message = item {
                             count += 1
@@ -4580,9 +4588,58 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
             self.updatedRecentPeersDisposable.set(context.engine.peers.managedUpdatedRecentPeers().startStrict())
         }
 
+        let profileScopedRecentItems = combineLatest(recentItems, context.sharedContext.doubleBottomProfileUIState.updates)
+        |> mapToSignal { recentItems, _ -> Signal<RecentItems, NoError> in
+            switch context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) {
+            case .ordinary, .primary:
+                return .single(recentItems)
+            case .secureExited:
+                return .single(RecentItems(entries: [], isChannelsTabExpanded: nil, recommendedChannelOrder: [], isEmpty: false))
+            case .decoy:
+                guard case .chats = key else {
+                    return .single(RecentItems(entries: [], isChannelsTabExpanded: nil, recommendedChannelOrder: [], isEmpty: false))
+                }
+                let peerIds = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.recentPeerIds.filter {
+                    context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: $0)
+                }
+                return context.engine.data.subscribe(
+                    EngineDataMap(peerIds.map(TelegramEngine.EngineData.Item.Peer.Peer.init(id:))),
+                    TelegramEngine.EngineData.Item.NotificationSettings.Global()
+                )
+                |> map { peers, globalNotificationSettings -> RecentItems in
+                    var entries: [ChatListRecentEntry] = []
+                    for peerId in peerIds {
+                        guard let peer = peers[peerId], let peer else {
+                            continue
+                        }
+                        entries.append(.peer(
+                            index: entries.count,
+                            peer: RecentlySearchedPeer(
+                                peer: RenderedPeer(peer: peer),
+                                presence: nil,
+                                notificationSettings: nil,
+                                unreadCount: 0,
+                                subpeerSummary: nil
+                            ),
+                            .local,
+                            presentationData.theme,
+                            presentationData.strings,
+                            presentationData.dateTimeFormat,
+                            presentationData.nameSortOrder,
+                            presentationData.nameDisplayOrder,
+                            globalNotificationSettings,
+                            nil,
+                            false
+                        ))
+                    }
+                    return RecentItems(entries: entries, isChannelsTabExpanded: nil, recommendedChannelOrder: [], isEmpty: false)
+                }
+            }
+        }
+
         self.recentDisposable.set((combineLatest(queue: .mainQueue(),
             presentationDataPromise.get(),
-            recentItems,
+            profileScopedRecentItems,
             context.sharedContext.doubleBottomPeerPolicy.updates
         )
         |> deliverOnMainQueue).startStrict(next: { [weak self] presentationData, recentItems, _ in
@@ -4591,16 +4648,17 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 recentItems.entries = recentItems.entries.compactMap { entry in
                     switch entry {
                     case let .topPeers(peers, theme, strings):
-                        let peers = peers.filter { context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0.id) }
+                        let peers = peers.filter { context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: $0.id) }
                         return peers.isEmpty ? nil : .topPeers(peers, theme, strings)
                     case let .peer(_, peer, _, _, _, _, _, _, _, _, _):
-                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.peer.peerId) ? entry : nil
+                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peer.peer.peerId) ? entry : nil
                     case .footer:
-                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary ? entry : nil
+                        let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                        return policyMode == .ordinary || policyMode == .primary ? entry : nil
                     }
                 }
                 recentItems.recommendedChannelOrder = recentItems.recommendedChannelOrder.filter {
-                    context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0)
+                    context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: $0)
                 }
                 let previousRecentItems = previousRecentItemsValue.swap(recentItems)
 
@@ -4701,7 +4759,12 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         if threadId == nil {
                             switch location {
                             case .chatList, .forum:
-                                let _ = context.engine.peers.addRecentlySearchedPeer(peerId: peer.id).startStandalone()
+                                let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                                if policyMode == .ordinary || policyMode == .primary {
+                                    let _ = context.engine.peers.addRecentlySearchedPeer(peerId: peer.id).startStandalone()
+                                } else if policyMode == .decoy {
+                                    let _ = context.sharedContext.doubleBottomProfileUIState.addRecentPeerId(peer.id).startStandalone()
+                                }
                             case .savedMessagesChats:
                                 break
                             }
@@ -4717,9 +4780,19 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         gesture?.cancel()
                     }
                 }, clearRecentlySearchedPeers: { sourceNode in
-                    interaction.clearRecentSearch(sourceNode)
+                    let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                    if policyMode == .ordinary || policyMode == .primary {
+                        interaction.clearRecentSearch(sourceNode)
+                    } else if policyMode == .decoy {
+                        let _ = context.sharedContext.doubleBottomProfileUIState.clearRecentPeerIds().startStandalone()
+                    }
                 }, deletePeer: { peerId in
-                    let _ = context.engine.peers.removeRecentlySearchedPeer(peerId: peerId).startStandalone()
+                    let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                    if policyMode == .ordinary || policyMode == .primary {
+                        let _ = context.engine.peers.removeRecentlySearchedPeer(peerId: peerId).startStandalone()
+                    } else if policyMode == .decoy {
+                        let _ = context.sharedContext.doubleBottomProfileUIState.removeRecentPeerId(peerId).startStandalone()
+                    }
                 }, animationCache: strongSelf.animationCache, animationRenderer: strongSelf.animationRenderer, openStories: { peerId, avatarNode in
                     interaction.openStories?(peerId, avatarNode)
                 }, openTopAppsInfo: {

@@ -599,13 +599,15 @@ public final class ContactsSearchContainerNode: SearchDisplayControllerContentNo
                     entries = entries.filter { entry in
                         switch entry {
                         case .addContact:
-                            return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                            let mode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                            return mode == .ordinary || mode == .primary
                         case let .peer(_, _, _, peer, _, _, _, _, _):
                             switch peer {
                             case let .peer(peer, _, _):
-                                return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.id)
+                                return context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peer.id)
                             case .deviceContact:
-                                return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                                let mode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                                return mode == .ordinary || mode == .primary
                             }
                         }
                     }

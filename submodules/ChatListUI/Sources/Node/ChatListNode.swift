@@ -1541,6 +1541,19 @@ public final class ChatListNode: ListViewImpl {
                 }
             }
         }, setItemPinned: { [weak self] itemId, _ in
+            if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                guard case let .peer(peerId) = itemId else {
+                    return
+                }
+                var pinnedPeerIds = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.pinnedPeerIds
+                if let index = pinnedPeerIds.firstIndex(of: peerId) {
+                    pinnedPeerIds.remove(at: index)
+                } else {
+                    pinnedPeerIds.insert(peerId, at: 0)
+                }
+                let _ = context.sharedContext.doubleBottomProfileUIState.setPinnedPeerIds(pinnedPeerIds).startStandalone()
+                return
+            }
             if case let .savedMessagesChats(peerId) = location {
                 if case let .peer(itemPeerId) = itemId {
                     let _ = (context.engine.peers.toggleForumChannelTopicPinned(id: peerId, threadId: itemPeerId.toInt64())
@@ -2159,7 +2172,8 @@ public final class ChatListNode: ListViewImpl {
                 context.sharedContext.doubleBottomPeerPolicy.updates
             )
             |> map { filters, displayTags, _ -> [ChatListFilter]? in
-                if !displayTags || context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
+                let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId)
+                if !displayTags || (policyMode != .ordinary && policyMode != .primary) {
                     return nil
                 }
                 return filters.filter { filter in
@@ -2173,6 +2187,12 @@ public final class ChatListNode: ListViewImpl {
         let previousChatListFilters = Atomic<[ChatListFilter]?>(value: nil)
         
         let previousAccountIsPremium = Atomic<Bool?>(value: nil)
+
+        let doubleBottomUpdates = combineLatest(
+            context.sharedContext.doubleBottomPeerPolicy.updates,
+            context.sharedContext.doubleBottomProfileUIState.updates
+        )
+        |> map { _ in () }
         
         let accountIsPremium = context.engine.data.subscribe(
             TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId)
@@ -2192,7 +2212,7 @@ public final class ChatListNode: ListViewImpl {
             contacts,
             chatListFilters,
             accountIsPremium,
-            context.sharedContext.doubleBottomPeerPolicy.updates
+            doubleBottomUpdates
         )
         |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, _) -> Signal<ChatListNodeListViewTransition, NoError> in
             let (update, filter) = updateAndFilter
@@ -2202,23 +2222,31 @@ public final class ChatListNode: ListViewImpl {
             let innerIsMainTab = location == .chatList(groupId: .root) && chatListFilter == nil
             
             let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
+            let doubleBottomUIState = context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+            let selectedDecoyFolderPeerIds: Set<PeerId>? = doubleBottomUIState.selectedFolderId.flatMap { selectedFolderId in
+                return doubleBottomUIState.folders.first(where: { $0.id == selectedFolderId })?.peerIds
+            }
             var isEmpty = true
             var entries = rawEntries.filter { entry in
                 switch entry {
                 case let .PeerEntry(peerEntry):
-                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerEntry.peer.peerId) else {
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peerEntry.peer.peerId) else {
+                        return false
+                    }
+                    if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy, let selectedDecoyFolderPeerIds, !selectedDecoyFolderPeerIds.contains(peerEntry.peer.peerId) {
                         return false
                     }
                 case let .ContactEntry(contactEntry):
-                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: contactEntry.peer.id) else {
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: contactEntry.peer.id) else {
                         return false
                     }
                 case .GroupReferenceEntry:
-                    guard context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary else {
+                    let policyMode = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId)
+                    guard policyMode == .ordinary || policyMode == .primary else {
                         return false
                     }
                 case let .TopPeer(_, peer):
-                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.id) else {
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peer.id) else {
                         return false
                     }
                 default:
@@ -2504,6 +2532,68 @@ public final class ChatListNode: ListViewImpl {
             }
             if isEmpty {
                 entries = [.HeaderEntry]
+            } else if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy {
+                let pinnedIndices = doubleBottomUIState.pinnedPeerIds.enumerated().reduce(into: [PeerId: Int]()) { result, item in
+                    if result[item.element] == nil {
+                        result[item.element] = item.offset
+                    }
+                }
+                let indexedPeerEntries = entries.enumerated().compactMap { index, entry -> (Int, ChatListNodeEntry)? in
+                    if case .PeerEntry = entry {
+                        return (index, entry)
+                    } else {
+                        return nil
+                    }
+                }
+                for indexedEntry in indexedPeerEntries {
+                    guard case var .PeerEntry(peerEntry) = indexedEntry.1, case let .chatList(index) = peerEntry.index else {
+                        continue
+                    }
+                    peerEntry.index = .chatList(EngineChatList.Item.Index.ChatList(
+                        pinningIndex: pinnedIndices[peerEntry.peer.peerId].flatMap { UInt16(exactly: $0) },
+                        messageIndex: index.messageIndex
+                    ))
+                    entries[indexedEntry.0] = .PeerEntry(peerEntry)
+                }
+                let normalizedIndexedPeerEntries = entries.enumerated().compactMap { index, entry -> (Int, ChatListNodeEntry)? in
+                    if case .PeerEntry = entry {
+                        return (index, entry)
+                    } else {
+                        return nil
+                    }
+                }
+                let originalIndices = Dictionary(uniqueKeysWithValues: normalizedIndexedPeerEntries.enumerated().compactMap { offset, item -> (PeerId, Int)? in
+                    guard case let .PeerEntry(peerEntry) = item.1 else {
+                        return nil
+                    }
+                    return (peerEntry.peer.peerId, offset)
+                })
+                let sortedPeerEntries = normalizedIndexedPeerEntries.map(\.1).sorted { lhs, rhs in
+                    guard case let .PeerEntry(lhsEntry) = lhs, case let .PeerEntry(rhsEntry) = rhs else {
+                        return false
+                    }
+                    let lhsPinnedIndex = pinnedIndices[lhsEntry.peer.peerId]
+                    let rhsPinnedIndex = pinnedIndices[rhsEntry.peer.peerId]
+                    if lhsPinnedIndex != rhsPinnedIndex {
+                        if let lhsPinnedIndex, let rhsPinnedIndex {
+                            return lhsPinnedIndex < rhsPinnedIndex
+                        } else {
+                            return lhsPinnedIndex != nil
+                        }
+                    }
+                    if doubleBottomUIState.sortOrder == .title {
+                        let lhsTitle = lhsEntry.peer.chatMainPeer?.compactDisplayTitle ?? ""
+                        let rhsTitle = rhsEntry.peer.chatMainPeer?.compactDisplayTitle ?? ""
+                        let comparison = lhsTitle.localizedCaseInsensitiveCompare(rhsTitle)
+                        if comparison != .orderedSame {
+                            return comparison == .orderedAscending
+                        }
+                    }
+                    return (originalIndices[lhsEntry.peer.peerId] ?? 0) < (originalIndices[rhsEntry.peer.peerId] ?? 0)
+                }
+                for (offset, indexedEntry) in normalizedIndexedPeerEntries.enumerated() {
+                    entries[indexedEntry.0] = sortedPeerEntries[offset]
+                }
             }
             
             let processedView = ChatListNodeView(originalList: update.list, filteredEntries: entries, isLoading: isLoading, filter: filter)
@@ -2939,6 +3029,26 @@ public final class ChatListNode: ListViewImpl {
             }
             guard fromIndex >= 0 && fromIndex < filteredEntries.count && toIndex >= 0 && toIndex < filteredEntries.count else {
                 return .single(false)
+            }
+
+            if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                let fromEntry = filteredEntries[filteredEntries.count - 1 - fromIndex]
+                let toEntry = filteredEntries[filteredEntries.count - 1 - toIndex]
+                guard case let .PeerEntry(fromPeerEntry) = fromEntry, case let .PeerEntry(toPeerEntry) = toEntry else {
+                    return .single(false)
+                }
+                var pinnedPeerIds = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.pinnedPeerIds
+                guard let fromPinnedIndex = pinnedPeerIds.firstIndex(of: fromPeerEntry.peer.peerId) else {
+                    return .single(false)
+                }
+                pinnedPeerIds.remove(at: fromPinnedIndex)
+                if let toPinnedIndex = pinnedPeerIds.firstIndex(of: toPeerEntry.peer.peerId) {
+                    pinnedPeerIds.insert(fromPeerEntry.peer.peerId, at: toPinnedIndex)
+                } else {
+                    pinnedPeerIds.append(fromPeerEntry.peer.peerId)
+                }
+                return context.sharedContext.doubleBottomProfileUIState.setPinnedPeerIds(pinnedPeerIds)
+                |> map { true }
             }
             
             switch strongSelf.location {

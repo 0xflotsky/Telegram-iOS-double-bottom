@@ -120,9 +120,9 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
             }
         })
 
-        self.doubleBottomPolicyDisposable = (context.sharedContext.doubleBottomPeerPolicy.mode
+        self.doubleBottomPolicyDisposable = (context.sharedContext.doubleBottomPeerPolicy.mode(accountPeerId: context.account.peerId)
         |> deliverOnMainQueue).startStrict(next: { [weak self] mode in
-            if mode != .primary {
+            if mode == .decoy || mode == .secureExited {
                 self?.sanitizeForDoubleBottomPolicy()
             }
         })
@@ -295,6 +295,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         self.presentedViewController?.dismiss(animated: false)
         self.dismissMinimizedControllers(animated: false)
         self.popToRoot(animated: false)
+        self.chatListController?.deactivateSearch(animated: false)
         self.openChatsController(activateSearch: false)
     }
     

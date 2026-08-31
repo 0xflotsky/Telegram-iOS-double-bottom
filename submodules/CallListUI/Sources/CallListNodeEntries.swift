@@ -213,12 +213,12 @@ enum CallListNodeEntry: Comparable, Identifiable {
     }
 }
 
-func callListNodeEntriesForView(view: EngineCallList, displayOpenNewCall: Bool, groupCalls: [EnginePeer], state: CallListNodeState, showSettings: Bool, showCallsTab: Bool, isRecentCalls: Bool, currentGroupCallPeerId: EnginePeer.Id?, doubleBottomPeerPolicy: DoubleBottomPeerPolicy) -> [CallListNodeEntry] {
+func callListNodeEntriesForView(view: EngineCallList, displayOpenNewCall: Bool, groupCalls: [EnginePeer], state: CallListNodeState, showSettings: Bool, showCallsTab: Bool, isRecentCalls: Bool, currentGroupCallPeerId: EnginePeer.Id?, accountPeerId: PeerId, doubleBottomPeerPolicy: DoubleBottomPeerPolicy) -> [CallListNodeEntry] {
     var result: [CallListNodeEntry] = []
     for entry in view.items {
         switch entry {
             case let .message(topMessage, messages):
-                guard doubleBottomPeerPolicy.canAccess(peerId: topMessage.id.peerId) else {
+                guard doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: topMessage.id.peerId) else {
                     continue
                 }
                 result.append(.messageEntry(topMessage: topMessage, messages: messages, theme: state.presentationData.theme, strings: state.presentationData.strings, dateTimeFormat: state.dateTimeFormat, editing: state.editing, hasActiveRevealControls: state.messageIdWithRevealedOptions == topMessage.id, displayHeader: !showSettings && isRecentCalls, missed: !isRecentCalls))
@@ -229,7 +229,7 @@ func callListNodeEntriesForView(view: EngineCallList, displayOpenNewCall: Bool, 
     
     if !view.hasLater {
         if !showSettings && isRecentCalls {
-            for peer in groupCalls.filter({ doubleBottomPeerPolicy.canAccess(peerId: $0.id) }).sorted(by: { lhs, rhs in
+            for peer in groupCalls.filter({ doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: $0.id) }).sorted(by: { lhs, rhs in
                 let lhsTitle = lhs.compactDisplayTitle
                 let rhsTitle = rhs.compactDisplayTitle
                 if lhsTitle != rhsTitle {

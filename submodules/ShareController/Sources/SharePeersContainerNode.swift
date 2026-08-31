@@ -186,14 +186,14 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
             }
             
             var existingPeerIds: Set<EnginePeer.Id> = Set()
-            if environment.doubleBottomCanAccess(peerId: accountPeer.id) {
+            if environment.doubleBottomCanAccess(accountPeerId: context.accountPeerId, peerId: accountPeer.id) {
                 entries.append(SharePeerEntry(index: index, item: .peer(peer: EngineRenderedPeer(peer: accountPeer), presence: nil, topicId: nil, threadData: nil, requiresPremiumForMessaging: false, requiresStars: nil), theme: theme, strings: strings))
                 existingPeerIds.insert(accountPeer.id)
                 index += 1
             }
             
             for (peer, requiresPremiumForMessaging) in foundPeers.reversed() {
-                if !existingPeerIds.contains(peer.peerId) && environment.doubleBottomCanAccess(peerId: peer.peerId) {
+                if !existingPeerIds.contains(peer.peerId) && environment.doubleBottomCanAccess(accountPeerId: context.accountPeerId, peerId: peer.peerId) {
                     entries.append(SharePeerEntry(index: index, item: .peer(peer: peer, presence: nil, topicId: nil, threadData: nil, requiresPremiumForMessaging: requiresPremiumForMessaging, requiresStars: nil), theme: theme, strings: strings))
                     existingPeerIds.insert(peer.peerId)
                     index += 1
@@ -201,7 +201,7 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
             }
             
             for (peer, presence, requiresPremiumForMessaging, requiresStars) in initialPeers {
-                if !existingPeerIds.contains(peer.peerId) && environment.doubleBottomCanAccess(peerId: peer.peerId) {
+                if !existingPeerIds.contains(peer.peerId) && environment.doubleBottomCanAccess(accountPeerId: context.accountPeerId, peerId: peer.peerId) {
                     let thread = controllerInteraction?.selectedTopics[peer.peerId]
                     entries.append(SharePeerEntry(index: index, item: .peer(peer: peer, presence: presence, topicId: thread?.0, threadData: thread?.1, requiresPremiumForMessaging: requiresPremiumForMessaging, requiresStars: requiresStars), theme: theme, strings: strings))
                     existingPeerIds.insert(peer.peerId)

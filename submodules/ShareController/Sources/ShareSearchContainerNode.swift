@@ -420,7 +420,7 @@ final class ShareSearchContainerNode: ASDisplayNode, ShareContentContainerNode {
                         guard let peerId = entry.peer?.peerId else {
                             return isPlaceholder
                         }
-                        return environment.doubleBottomCanAccess(peerId: peerId)
+                        return environment.doubleBottomCanAccess(accountPeerId: context.accountPeerId, peerId: peerId)
                     }
                     return (entries, isPlaceholder)
                 }
@@ -475,12 +475,12 @@ final class ShareSearchContainerNode: ASDisplayNode, ShareContentContainerNode {
         let recentItems: Signal<[ShareSearchRecentEntry], NoError> = combineLatest(hasRecentPeers, self.themePromise.get(), environment.doubleBottomPeerPolicyUpdates)
         |> map { hasRecentPeers, theme, _ -> [ShareSearchRecentEntry] in
             var recentItemList: [ShareSearchRecentEntry] = []
-            if hasRecentPeers && environment.doubleBottomIsPrimary {
+            if hasRecentPeers && environment.doubleBottomUsesOrdinaryState(accountPeerId: context.accountPeerId) {
                 recentItemList.append(.topPeers(theme, strings))
             }
             var index = 0
             for (peer, requiresPremiumForMessaging) in recentPeerList {
-                if let mainPeer = peer.peers[peer.peerId], canSendMessagesToPeer(mainPeer), environment.doubleBottomCanAccess(peerId: mainPeer.id) {
+                if let mainPeer = peer.peers[peer.peerId], canSendMessagesToPeer(mainPeer), environment.doubleBottomCanAccess(accountPeerId: context.accountPeerId, peerId: mainPeer.id) {
                     recentItemList.append(.peer(index: index, theme: theme, peer: mainPeer, associatedPeer: mainPeer.associatedPeerId.flatMap { peer.peers[$0] }, presence: nil, requiresPremiumForMessaging: requiresPremiumForMessaging, requiresStars: nil, strings: strings))
                     index += 1
                 }

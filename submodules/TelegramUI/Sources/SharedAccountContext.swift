@@ -153,6 +153,8 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public let doubleBottomCredentialStore: DoubleBottomCredentialStore
     public let doubleBottomPrivateStore: DoubleBottomPrivateStore
     public let doubleBottomPolicy: DoubleBottomPolicy
+    public let doubleBottomProfileUIState: DoubleBottomProfileUIStateContext
+    private let doubleBottomProfileUIStateImpl: DoubleBottomProfileUIStateContextImpl
     public var doubleBottomPeerPolicy: DoubleBottomPeerPolicy {
         return self.doubleBottomPolicy
     }
@@ -324,11 +326,14 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         let doubleBottomCredentialStore = DoubleBottomCredentialStore()
         let doubleBottomPrivateStore = DoubleBottomPrivateStore(basePath: basePath)
         let doubleBottomPolicy = DoubleBottomPolicy(context: doubleBottomContext, privateStore: doubleBottomPrivateStore)
+        let doubleBottomProfileUIState = DoubleBottomProfileUIStateContextImpl(privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy)
         self.doubleBottomContext = doubleBottomContext
         self.doubleBottomCredentialStore = doubleBottomCredentialStore
         self.doubleBottomPrivateStore = doubleBottomPrivateStore
         self.doubleBottomPolicy = doubleBottomPolicy
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy)
+        self.doubleBottomProfileUIState = doubleBottomProfileUIState
+        self.doubleBottomProfileUIStateImpl = doubleBottomProfileUIState
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext
@@ -812,6 +817,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
                 }
                 if hadUpdates {
                     self.activeAccountsValue!.accounts.sort(by: { $0.2 < $1.2 })
+                    self.doubleBottomPolicy.setActiveAccountPeerId(self.activeAccountsValue!.primary?.account.peerId)
                     self.activeAccountsPromise.set(.single(self.activeAccountsValue!))
                     
                     self.performAccountSettingsImportIfNecessary()
@@ -1782,6 +1788,15 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         if self.activeAccountsValue?.primary?.account.id == id {
             return
         }
+
+        guard let currentContext = self.activeAccountsValue?.primary,
+              let targetContext = self.activeAccountsValue?.accounts.first(where: { $0.0 == id })?.1 else {
+            return
+        }
+        let currentMode = self.doubleBottomPolicy.currentMode(accountPeerId: currentContext.account.peerId)
+        if currentMode != .ordinary || self.doubleBottomPolicy.isOwner(accountPeerId: targetContext.account.peerId) {
+            return
+        }
         
         assert(Queue.mainQueue().isCurrent())
         var chatsBadge: String?
@@ -1825,7 +1840,8 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToChat(accountId: AccountRecordId, peerId: PeerId, messageId: MessageId?) {
-        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+        guard let context = self.activeAccountsValue?.accounts.first(where: { $0.0 == accountId })?.1,
+              self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) else {
             return
         }
         self.navigateToChatImpl(accountId, peerId, messageId, true)
@@ -1861,7 +1877,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func openChatMessage(_ params: OpenChatMessageParams) -> Bool {
-        guard self.doubleBottomPolicy.canAccess(peerId: params.message.id.peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: params.context.account.peerId, peerId: params.message.id.peerId) else {
             return false
         }
         return openChatMessageImpl(params)
@@ -1964,7 +1980,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func makePeerInfoController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?, peer: EnginePeer, mode: PeerInfoControllerMode, avatarInitiallyExpanded: Bool, fromChat: Bool, requestsContext: PeerInvitationImportersContext?) -> ViewController? {
-        guard self.doubleBottomPolicy.canAccess(peerId: peer.id) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peer.id) else {
             return nil
         }
         let controller = peerInfoControllerImpl(context: context, updatedPresentationData: updatedPresentationData, peer: peer, mode: mode, avatarInitiallyExpanded: avatarInitiallyExpanded, isOpenedFromChat: fromChat)
@@ -2198,7 +2214,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToChatController(_ params: NavigateToChatControllerParams) {
-        guard self.doubleBottomPolicy.canAccess(peerId: params.chatLocation.peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: params.context.account.peerId, peerId: params.chatLocation.peerId) else {
             params.navigationController.popToRoot(animated: false)
             return
         }
@@ -2206,7 +2222,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToForumChannel(context: AccountContext, peerId: EnginePeer.Id, navigationController: NavigationController) {
-        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) else {
             navigationController.popToRoot(animated: false)
             return
         }
@@ -2214,7 +2230,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToForumThread(context: AccountContext, peerId: EnginePeer.Id, threadId: Int64, messageId: EngineMessage.Id?, navigationController: NavigationController, activateInput: ChatControllerActivateInput?, scrollToEndIfExists: Bool, keepStack: NavigateToChatKeepStack, animated: Bool) -> Signal<Never, NoError> {
-        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) else {
             navigationController.popToRoot(animated: false)
             return .complete()
         }
@@ -2222,7 +2238,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func chatControllerForForumThread(context: AccountContext, peerId: EnginePeer.Id, threadId: Int64) -> Signal<ChatController, NoError> {
-        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) else {
             return .complete()
         }
         return chatControllerForForumThreadImpl(context: context, peerId: peerId, threadId: threadId)
@@ -2310,14 +2326,14 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         default:
             directPeerId = nil
         }
-        if let directPeerId, !self.doubleBottomPolicy.canAccess(peerId: directPeerId) {
+        if let directPeerId, !self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: directPeerId) {
             navigationController?.popToRoot(animated: false)
             completion?()
             return
         }
 
         let gatedOpenPeer: (EnginePeer, ChatControllerInteractionNavigateToPeer) -> Void = { [weak self] peer, navigation in
-            guard self?.doubleBottomPolicy.canAccess(peerId: peer.id) == true else {
+            guard self?.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peer.id) == true else {
                 navigationController?.popToRoot(animated: false)
                 return
             }
@@ -2325,7 +2341,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         }
         let gatedJoinVoiceChat: ((PeerId, String?, CachedChannelData.ActiveCall) -> Void)? = joinVoiceChat.map { joinVoiceChat in
             return { [weak self] peerId, invite, call in
-                guard self?.doubleBottomPolicy.canAccess(peerId: peerId) == true else {
+                guard self?.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) == true else {
                     return
                 }
                 joinVoiceChat(peerId, invite, call)
@@ -2384,7 +2400,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func makePeerSharedMediaController(context: AccountContext, peerId: PeerId) -> ViewController? {
-        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+        guard self.doubleBottomPolicy.canAccess(accountPeerId: context.account.peerId, peerId: peerId) else {
             return nil
         }
         return nil

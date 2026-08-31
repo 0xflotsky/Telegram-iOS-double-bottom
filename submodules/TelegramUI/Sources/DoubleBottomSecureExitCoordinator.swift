@@ -172,6 +172,7 @@ final class DoubleBottomSecureExitCoordinator {
                 if window.privacyCoveringView !== self.coveringView {
                     window.privacyCoveringView = self.coveringView
                 }
+                (window.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
                 self.privateStore.clearDecryptedState()
                 self.profileUIState.clearSensitiveState()
             }
@@ -182,6 +183,30 @@ final class DoubleBottomSecureExitCoordinator {
         self.accessStateDisposable?.dispose()
         self.verificationDisposable.dispose()
         self.applyProfileDisposable.dispose()
+    }
+
+    func secureExit() {
+        assert(Queue.mainQueue().isCurrent())
+        guard let window = self.window else {
+            self.context.secureExit()
+            return
+        }
+
+        window.hostView.eventView.endEditing(true)
+        if window.privacyCoveringView !== self.coveringView {
+            window.privacyCoveringView = self.coveringView
+        }
+
+        (window.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
+        window.forEachViewController { controller in
+            controller.view.endEditing(true)
+            return true
+        }
+        self.verificationDisposable.set(nil)
+        self.applyProfileDisposable.set(nil)
+        self.privateStore.clearDecryptedState()
+        self.profileUIState.clearSensitiveState()
+        self.context.secureExit()
     }
 
     private func verify(password: String) {

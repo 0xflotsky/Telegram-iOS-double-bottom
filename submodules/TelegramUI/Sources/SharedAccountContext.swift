@@ -2016,7 +2016,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         guard self.doubleBottomPolicy.isOwner(accountPeerId: accountPeerId) else {
             return false
         }
-        self.doubleBottomContext.secureExit()
+        self.doubleBottomSecureExitCoordinator.secureExit()
         return true
     }
 

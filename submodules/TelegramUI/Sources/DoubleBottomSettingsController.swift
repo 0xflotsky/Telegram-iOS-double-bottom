@@ -188,7 +188,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
             let current = self.sharedContext.doubleBottomProfileUIState.currentDecoyState.sortOrder
             let _ = self.sharedContext.doubleBottomProfileUIState.setSortOrder(current == .activity ? .title : .activity).startStandalone()
         case .secureExit:
-            self.sharedContext.doubleBottomContext.secureExit()
+            let _ = self.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId)
         }
     }
 

@@ -40,12 +40,13 @@ public struct DoubleBottomSettings: Codable, Equatable {
             self.currentProfile = .primary
             return
         }
-        self.currentProfile = (try? container.decode(DoubleBottomProfile.self, forKey: .currentProfile)) ?? .primary
+        let rawValue = (try? container.decode(Int32.self, forKey: .currentProfile)) ?? DoubleBottomProfile.primary.rawValue
+        self.currentProfile = DoubleBottomProfile(rawValue: rawValue) ?? .primary
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(self.currentProfile, forKey: .currentProfile)
+        try container.encode(self.currentProfile.rawValue, forKey: .currentProfile)
     }
 }
 

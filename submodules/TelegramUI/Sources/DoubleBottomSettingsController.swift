@@ -360,3 +360,93 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         self.present(alert, animated: true)
     }
 }
+
+final class DoubleBottomDecoyPasswordController: ViewController, UITableViewDataSource, UITableViewDelegate {
+    private let context: AccountContext
+    private let credentialStore: DoubleBottomCredentialStore
+    private let actionDisposable = MetaDisposable()
+
+    private var controllerNode: DoubleBottomSettingsControllerNode {
+        return self.displayNode as! DoubleBottomSettingsControllerNode
+    }
+
+    init(context: AccountContext, credentialStore: DoubleBottomCredentialStore) {
+        self.context = context
+        self.credentialStore = credentialStore
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationTheme: presentationData.theme, presentationStrings: presentationData.strings))
+        self.title = presentationData.strings.PrivacySettings_TwoStepAuth
+    }
+
+    required init(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        self.actionDisposable.dispose()
+    }
+
+    override func loadDisplayNode() {
+        let node = DoubleBottomSettingsControllerNode()
+        node.tableView.dataSource = self
+        node.tableView.delegate = self
+        self.displayNode = node
+        self.displayNodeDidLoad()
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
+        let navigationHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
+        self.controllerNode.tableView.contentInset.top = navigationHeight
+        self.controllerNode.tableView.scrollIndicatorInsets.top = navigationHeight
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int {
+        return 1
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return 1
+    }
+
+    func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        return "This password protects the local profile on this iPhone. It does not change your Telegram cloud password."
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        cell.textLabel?.text = "Change Password"
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let alert = UIAlertController(title: "Change Password", message: "Enter a new local password.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "New password"
+            field.isSecureTextEntry = true
+            field.textContentType = .newPassword
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { [weak self, weak alert] _ in
+            guard let self, let password = alert?.textFields?.first?.text else {
+                return
+            }
+            self.actionDisposable.set((self.credentialStore.setPassword(password, for: .decoy)
+            |> deliverOnMainQueue).startStandalone(error: { [weak self] error in
+                let message: String
+                if error == .passwordsMustDiffer {
+                    message = "Primary and Decoy passwords must be different."
+                } else {
+                    message = "Could not change the local password."
+                }
+                let errorAlert = UIAlertController(title: "Password", message: message, preferredStyle: .alert)
+                errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(errorAlert, animated: true)
+            }))
+        }))
+        self.present(alert, animated: true)
+    }
+}

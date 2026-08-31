@@ -2005,6 +2005,13 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         return DoubleBottomSettingsController(context: context, sharedContext: self)
     }
 
+    public func makeDoubleBottomDecoyPasswordController(context: AccountContext) -> ViewController? {
+        guard self.doubleBottomPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy else {
+            return nil
+        }
+        return DoubleBottomDecoyPasswordController(context: context, credentialStore: self.doubleBottomCredentialStore)
+    }
+
     public func performDoubleBottomSecureExitIfOwner(accountPeerId: EnginePeer.Id) -> Bool {
         guard self.doubleBottomPolicy.isOwner(accountPeerId: accountPeerId) else {
             return false

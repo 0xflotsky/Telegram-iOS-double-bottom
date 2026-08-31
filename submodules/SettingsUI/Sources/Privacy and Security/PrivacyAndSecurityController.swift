@@ -902,6 +902,7 @@ public func privacyAndSecurityController(
     
     let updateTwoStepAuthDisposable = MetaDisposable()
     actionsDisposable.add(updateTwoStepAuthDisposable)
+    let isDoubleBottomDecoy = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy
     
 
     let updatePasskeyDataDisposable = MetaDisposable()
@@ -922,7 +923,9 @@ public func privacyAndSecurityController(
     }
     
     let twoStepAuth = Promise<Bool?>()
-    if let hasTwoStepAuth = hasTwoStepAuth {
+    if isDoubleBottomDecoy {
+        twoStepAuth.set(.single(true))
+    } else if let hasTwoStepAuth = hasTwoStepAuth {
         twoStepAuth.set(.single(hasTwoStepAuth) |> then(hasTwoStepAuthDataValue))
     } else {
         twoStepAuth.set(hasTwoStepAuthDataValue)
@@ -942,7 +945,9 @@ public func privacyAndSecurityController(
     passkeys.set(hasPasskeysDataValue)
     
     let loginEmail: Signal<String?, NoError>
-    if let loginEmailPattern = loginEmailPattern {
+    if isDoubleBottomDecoy {
+        loginEmail = .single(nil)
+    } else if let loginEmailPattern = loginEmailPattern {
         loginEmail = loginEmailPattern
     } else {
         loginEmail = .single(nil)
@@ -959,6 +964,10 @@ public func privacyAndSecurityController(
     }
     
     let updateHasTwoStepAuth: () -> Void = {
+        if isDoubleBottomDecoy {
+            twoStepAuthDataValue.set(.single(nil))
+            return
+        }
         let signal = context.engine.auth.twoStepVerificationConfiguration()
         |> map { value -> TwoStepVerificationAccessConfiguration? in
             return TwoStepVerificationAccessConfiguration(configuration: value, password: nil)
@@ -1274,6 +1283,12 @@ public func privacyAndSecurityController(
             }
         })
     }, openTwoStepVerification: { data in
+        if isDoubleBottomDecoy {
+            if let controller = context.sharedContext.makeDoubleBottomDecoyPasswordController(context: context) {
+                pushControllerImpl?(controller, true)
+            }
+            return
+        }
         let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId))
         |> deliverOnMainQueue).start(next: { peer in
             if let data = data {

@@ -535,7 +535,8 @@ func settingsEditingItems(data: PeerInfoScreenData?, state: PeerInfoState, conte
     
     items[.account]!.append(PeerInfoScreenCommentItem(id: ItemAddAccountHelp, text: hasPremiumAccounts ? presentationData.strings.Settings_AddAnotherAccount_PremiumHelp : presentationData.strings.Settings_AddAnotherAccount_Help))
     
-    items[.logout]!.append(PeerInfoScreenActionItem(id: ItemLogout, text: presentationData.strings.Settings_Logout, color: .destructive, alignment: .center, action: {
+    let logoutTitle = context.sharedContext.doubleBottomPeerPolicy.isOwner(accountPeerId: context.account.peerId) ? "Secure Exit" : presentationData.strings.Settings_Logout
+    items[.logout]!.append(PeerInfoScreenActionItem(id: ItemLogout, text: logoutTitle, color: .destructive, alignment: .center, action: {
         interaction.openSettings(.logout)
     }))
     

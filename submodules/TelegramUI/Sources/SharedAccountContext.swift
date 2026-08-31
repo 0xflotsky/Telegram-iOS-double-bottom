@@ -2004,6 +2004,14 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         }
         return DoubleBottomSettingsController(context: context, sharedContext: self)
     }
+
+    public func performDoubleBottomSecureExitIfOwner(accountPeerId: EnginePeer.Id) -> Bool {
+        guard self.doubleBottomPolicy.isOwner(accountPeerId: accountPeerId) else {
+            return false
+        }
+        self.doubleBottomContext.secureExit()
+        return true
+    }
     
     public func openCreateGroupCallUI(context: AccountContext, peerIds: [EnginePeer.Id], parentController: ViewController) {
         let _ = (context.engine.data.get(

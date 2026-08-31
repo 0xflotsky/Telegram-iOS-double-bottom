@@ -109,7 +109,7 @@ private enum LogoutOptionsEntry: ItemListNodeEntry, Equatable {
     }
 }
 
-private func logoutOptionsEntries(presentationData: PresentationData, canAddAccounts: Bool, hasPasscode: Bool) -> [LogoutOptionsEntry] {
+private func logoutOptionsEntries(presentationData: PresentationData, canAddAccounts: Bool, hasPasscode: Bool, isDoubleBottomOwner: Bool) -> [LogoutOptionsEntry] {
     var entries: [LogoutOptionsEntry] = []
     entries.append(.alternativeHeader(presentationData.theme, presentationData.strings.LogoutOptions_AlternativeOptionsSection))
     if canAddAccounts {
@@ -121,8 +121,8 @@ private func logoutOptionsEntries(presentationData: PresentationData, canAddAcco
     entries.append(.clearCache(presentationData.theme, presentationData.strings.LogoutOptions_ClearCacheTitle, presentationData.strings.LogoutOptions_ClearCacheText))
     entries.append(.changePhoneNumber(presentationData.theme, presentationData.strings.LogoutOptions_ChangePhoneNumberTitle, presentationData.strings.LogoutOptions_ChangePhoneNumberText))
     entries.append(.contactSupport(presentationData.theme, presentationData.strings.LogoutOptions_ContactSupportTitle, presentationData.strings.LogoutOptions_ContactSupportText))
-    entries.append(.logout(presentationData.theme, presentationData.strings.LogoutOptions_LogOut))
-    entries.append(.logoutInfo(presentationData.theme, presentationData.strings.LogoutOptions_LogOutInfo))
+    entries.append(.logout(presentationData.theme, isDoubleBottomOwner ? "Secure Exit" : presentationData.strings.LogoutOptions_LogOut))
+    entries.append(.logoutInfo(presentationData.theme, isDoubleBottomOwner ? "Secure Exit locks the local Primary and Decoy views without logging out of Telegram." : presentationData.strings.LogoutOptions_LogOutInfo))
     return entries
 }
 
@@ -255,6 +255,10 @@ public func logoutOptionsController(context: AccountContext, navigationControlle
             })
         ]), nil)
     }, logout: {
+        if context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: context.account.peerId) {
+            dismissImpl?()
+            return
+        }
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let alertController = textAlertController(context: context, title: presentationData.strings.Settings_LogoutConfirmationTitle, text: presentationData.strings.Settings_LogoutConfirmationText, actions: [
             TextAlertAction(type: .genericAction, title: presentationData.strings.Common_Cancel, action: {
@@ -281,7 +285,7 @@ public func logoutOptionsController(context: AccountContext, navigationControlle
         }
         
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(presentationData.strings.LogoutOptions_Title), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: logoutOptionsEntries(presentationData: presentationData, canAddAccounts: canAddAccounts, hasPasscode: hasPasscode), style: .blocks)
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: logoutOptionsEntries(presentationData: presentationData, canAddAccounts: canAddAccounts, hasPasscode: hasPasscode, isDoubleBottomOwner: context.sharedContext.doubleBottomPeerPolicy.isOwner(accountPeerId: context.account.peerId)), style: .blocks)
         
         return (controllerState, (listState, arguments))
     }

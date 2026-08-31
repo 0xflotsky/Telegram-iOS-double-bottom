@@ -68,6 +68,9 @@ extension PeerInfoScreenNode {
     }
     
     func logoutAccount(id: AccountRecordId) {
+        if id == self.context.account.id, self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
+            return
+        }
         let controller = ActionSheetController(presentationData: self.presentationData)
         let dismissAction: () -> Void = { [weak controller] in
             controller?.dismissAnimated()

@@ -249,6 +249,9 @@ extension PeerInfoScreenNode {
                 }
             })
         case .logout:
+            if self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
+                return
+            }
             if case let .user(user) = self.data?.peer, let phoneNumber = user.phone {
                 if let controller = self.controller, let navigationController = controller.navigationController as? NavigationController {
                     self.controller?.push(logoutOptionsController(context: self.context, navigationController: navigationController, canAddAccounts: true, phoneNumber: phoneNumber))

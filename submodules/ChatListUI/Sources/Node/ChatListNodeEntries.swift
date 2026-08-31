@@ -183,6 +183,15 @@ enum ChatListNodeEntry: Comparable, Identifiable {
             self.requiresPremiumForMessaging = requiresPremiumForMessaging
             self.displayAsTopicList = displayAsTopicList
         }
+
+        var dialogPeerId: EnginePeer.Id {
+            switch self.index {
+            case let .chatList(index):
+                return index.messageIndex.id.peerId
+            case .forum:
+                return self.peer.peerId
+            }
+        }
         
         static func ==(lhs: PeerEntryData, rhs: PeerEntryData) -> Bool {
             if lhs.index != rhs.index {

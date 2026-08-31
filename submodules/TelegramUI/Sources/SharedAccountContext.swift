@@ -2457,7 +2457,14 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func subscribeChatListData(context: AccountContext, location: ChatListControllerLocation) -> Signal<EngineChatList, NoError> {
-        return chatListViewForLocation(chatListLocation: location, location: .initial(count: 100, filter: nil), account: context.account, shouldLoadCanMessagePeer: false)
+        return self.doubleBottomPolicy.updates
+        |> mapToSignal { [weak self] _ -> Signal<ChatListNodeViewUpdate, NoError> in
+            guard let self else {
+                return .never()
+            }
+            let restrictedPeerIds = self.doubleBottomPolicy.restrictedChatPeerIds(accountPeerId: context.account.peerId)
+            return chatListViewForLocation(chatListLocation: location, location: .initial(count: 100, filter: nil), account: context.account, shouldLoadCanMessagePeer: false, restrictedPeerIds: restrictedPeerIds)
+        }
         |> map { update -> EngineChatList in
             return update.list
         }

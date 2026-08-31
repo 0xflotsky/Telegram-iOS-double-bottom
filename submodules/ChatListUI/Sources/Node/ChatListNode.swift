@@ -1941,10 +1941,13 @@ public final class ChatListNode: ListViewImpl {
             shouldLoadCanMessagePeer = false
         }
         
-        let chatListViewUpdate = self.chatListLocation.get()
-        |> distinctUntilChanged
-        |> mapToSignal { listLocation -> Signal<(ChatListNodeViewUpdate, ChatListFilter?), NoError> in
-            return chatListViewForLocation(chatListLocation: location, location: listLocation, account: context.account, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
+        let chatListViewUpdate = combineLatest(
+            self.chatListLocation.get() |> distinctUntilChanged,
+            context.sharedContext.doubleBottomPeerPolicy.updates
+        )
+        |> mapToSignal { listLocation, _ -> Signal<(ChatListNodeViewUpdate, ChatListFilter?), NoError> in
+            let restrictedPeerIds = context.sharedContext.doubleBottomPeerPolicy.restrictedChatPeerIds(accountPeerId: context.account.peerId)
+            return chatListViewForLocation(chatListLocation: location, location: listLocation, account: context.account, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer, restrictedPeerIds: restrictedPeerIds)
             |> map { update in
                 return (update, listLocation.filter)
             }
@@ -2230,10 +2233,10 @@ public final class ChatListNode: ListViewImpl {
             var entries = rawEntries.filter { entry in
                 switch entry {
                 case let .PeerEntry(peerEntry):
-                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peerEntry.peer.peerId) else {
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peerEntry.dialogPeerId) else {
                         return false
                     }
-                    if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy, let selectedDecoyFolderPeerIds, !selectedDecoyFolderPeerIds.contains(peerEntry.peer.peerId) {
+                    if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy, let selectedDecoyFolderPeerIds, !selectedDecoyFolderPeerIds.contains(peerEntry.dialogPeerId) {
                         return false
                     }
                 case let .ContactEntry(contactEntry):
@@ -2550,7 +2553,7 @@ public final class ChatListNode: ListViewImpl {
                         continue
                     }
                     peerEntry.index = .chatList(EngineChatList.Item.Index.ChatList(
-                        pinningIndex: pinnedIndices[peerEntry.peer.peerId].flatMap { UInt16(exactly: $0) },
+                        pinningIndex: pinnedIndices[peerEntry.dialogPeerId].flatMap { UInt16(exactly: $0) },
                         messageIndex: index.messageIndex
                     ))
                     entries[indexedEntry.0] = .PeerEntry(peerEntry)
@@ -2566,14 +2569,14 @@ public final class ChatListNode: ListViewImpl {
                     guard case let .PeerEntry(peerEntry) = item.1 else {
                         return nil
                     }
-                    return (peerEntry.peer.peerId, offset)
+                    return (peerEntry.dialogPeerId, offset)
                 })
                 let sortedPeerEntries = normalizedIndexedPeerEntries.map(\.1).sorted { lhs, rhs in
                     guard case let .PeerEntry(lhsEntry) = lhs, case let .PeerEntry(rhsEntry) = rhs else {
                         return false
                     }
-                    let lhsPinnedIndex = pinnedIndices[lhsEntry.peer.peerId]
-                    let rhsPinnedIndex = pinnedIndices[rhsEntry.peer.peerId]
+                    let lhsPinnedIndex = pinnedIndices[lhsEntry.dialogPeerId]
+                    let rhsPinnedIndex = pinnedIndices[rhsEntry.dialogPeerId]
                     if lhsPinnedIndex != rhsPinnedIndex {
                         if let lhsPinnedIndex, let rhsPinnedIndex {
                             return lhsPinnedIndex < rhsPinnedIndex
@@ -2589,7 +2592,7 @@ public final class ChatListNode: ListViewImpl {
                             return comparison == .orderedAscending
                         }
                     }
-                    return (originalIndices[lhsEntry.peer.peerId] ?? 0) < (originalIndices[rhsEntry.peer.peerId] ?? 0)
+                    return (originalIndices[lhsEntry.dialogPeerId] ?? 0) < (originalIndices[rhsEntry.dialogPeerId] ?? 0)
                 }
                 for (offset, indexedEntry) in normalizedIndexedPeerEntries.enumerated() {
                     entries[indexedEntry.0] = sortedPeerEntries[offset]
@@ -4031,7 +4034,8 @@ public final class ChatListNode: ListViewImpl {
                         shouldLoadCanMessagePeer = false
                     }
                     
-                    let _ = (chatListViewForLocation(chatListLocation: .chatList(groupId: groupId), location: .initial(count: 10, filter: filter), account: self.context.account, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer)
+                    let restrictedPeerIds = self.context.sharedContext.doubleBottomPeerPolicy.restrictedChatPeerIds(accountPeerId: self.context.account.peerId)
+                    let _ = (chatListViewForLocation(chatListLocation: .chatList(groupId: groupId), location: .initial(count: 10, filter: filter), account: self.context.account, shouldLoadCanMessagePeer: shouldLoadCanMessagePeer, restrictedPeerIds: restrictedPeerIds)
                     |> take(1)
                     |> deliverOnMainQueue).startStandalone(next: { update in
                         let items = update.list.items

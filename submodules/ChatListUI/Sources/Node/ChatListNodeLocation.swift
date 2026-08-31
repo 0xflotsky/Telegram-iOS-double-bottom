@@ -195,13 +195,22 @@ public func chatListFilterPredicate(filter: ChatListFilterData, accountPeerId: E
     })
 }
 
-public func chatListViewForLocation(chatListLocation: ChatListControllerLocation, location: ChatListNodeLocation, account: Account, shouldLoadCanMessagePeer: Bool) -> Signal<ChatListNodeViewUpdate, NoError> {
+public func chatListViewForLocation(chatListLocation: ChatListControllerLocation, location: ChatListNodeLocation, account: Account, shouldLoadCanMessagePeer: Bool, restrictedPeerIds: Set<EnginePeer.Id>? = nil) -> Signal<ChatListNodeViewUpdate, NoError> {
     let accountPeerId = account.peerId
     
     switch chatListLocation {
     case let .chatList(groupId):
         let filterPredicate: ChatListFilterPredicate?
-        if let filter = location.filter, case let .filter(_, _, _, data) = filter {
+        if let restrictedPeerIds {
+            filterPredicate = ChatListFilterPredicate(
+                includePeerIds: restrictedPeerIds,
+                excludePeerIds: Set(),
+                pinnedPeerIds: [],
+                messageTagSummary: nil,
+                includeAdditionalPeerGroupIds: [],
+                include: { _, _, _, _, _ in false }
+            )
+        } else if let filter = location.filter, case let .filter(_, _, _, data) = filter {
             filterPredicate = chatListFilterPredicate(filter: data, accountPeerId: account.peerId)
         } else {
             filterPredicate = nil

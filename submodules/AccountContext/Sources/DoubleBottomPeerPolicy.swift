@@ -16,4 +16,5 @@ public protocol DoubleBottomPeerPolicy: AnyObject {
     func isOwner(accountPeerId: PeerId) -> Bool
     func shouldDisplaySettings(accountPeerId: PeerId) -> Bool
     func canAccess(accountPeerId: PeerId, peerId: PeerId) -> Bool
+    func restrictedChatPeerIds(accountPeerId: PeerId) -> Set<PeerId>?
 }

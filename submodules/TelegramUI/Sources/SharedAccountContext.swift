@@ -149,6 +149,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public let basePath: String
     public let networkArguments: NetworkInitializationArguments
     public let accountManager: AccountManager<TelegramAccountManagerTypes>
+    public let doubleBottomContext: DoubleBottomContext
     public let appLockContext: AppLockContext
     public var notificationController: NotificationContainerController? {
         didSet {
@@ -312,6 +313,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.basePath = basePath
         self.networkArguments = networkArguments
         self.accountManager = accountManager
+        self.doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

@@ -316,9 +316,10 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.networkArguments = networkArguments
         self.accountManager = accountManager
         let doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
+        let doubleBottomCredentialStore = DoubleBottomCredentialStore()
         self.doubleBottomContext = doubleBottomContext
-        self.doubleBottomCredentialStore = DoubleBottomCredentialStore()
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext)
+        self.doubleBottomCredentialStore = doubleBottomCredentialStore
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

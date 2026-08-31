@@ -44,6 +44,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
     public var presentationData: PresentationData
     private let openUrl: (String) -> Void
     private let authorizationCompleted: () -> Void
+    private let purpose: AuthorizationSequencePurpose
     
     private var stateDisposable: Disposable?
     private let actionDisposable = MetaDisposable()
@@ -63,7 +64,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
     
     private var inAppPurchaseManager: InAppPurchaseManager!
     
-    public init(sharedContext: SharedAccountContext, account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), presentationData: PresentationData, openUrl: @escaping (String) -> Void, apiId: Int32, apiHash: String, authorizationCompleted: @escaping () -> Void) {
+    public init(sharedContext: SharedAccountContext, account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), presentationData: PresentationData, openUrl: @escaping (String) -> Void, apiId: Int32, apiHash: String, purpose: AuthorizationSequencePurpose = .normal, authorizationCompleted: @escaping () -> Void) {
         self.sharedContext = sharedContext
         self.account = account
         self.otherAccountPhoneNumbers = otherAccountPhoneNumbers
@@ -71,6 +72,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
         self.apiHash = apiHash
         self.presentationData = presentationData
         self.openUrl = openUrl
+        self.purpose = purpose
         self.authorizationCompleted = authorizationCompleted
         
         let navigationStatusBar: NavigationStatusBarStyle
@@ -122,6 +124,18 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
         self.actionDisposable.dispose()
         self.applicationStateDisposable?.dispose()
     }
+
+    private func doubleBottomReentryContext(for number: String) -> AuthorizationSequenceDoubleBottomReentryContext? {
+        guard case let .doubleBottomReentry(context) = self.purpose else {
+            return nil
+        }
+        let normalizedNumber = cleanPhoneNumber(number, removePlus: true)
+        let normalizedOwnerNumber = cleanPhoneNumber(context.preservedOwnerPhoneNumber, removePlus: true)
+        guard !normalizedNumber.isEmpty, normalizedNumber == normalizedOwnerNumber else {
+            return nil
+        }
+        return context
+    }
     
     override public func loadView() {
         super.loadView()
@@ -170,7 +184,14 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
         if let currentController = currentController {
             controller = currentController
         } else {
-            controller = AuthorizationSequencePhoneEntryController(sharedContext: self.sharedContext, account: self.account, apiId: self.apiId, apiHash: self.apiHash, isTestingEnvironment: self.account.testingEnvironment, otherAccountPhoneNumbers: self.otherAccountPhoneNumbers, network: self.account.network, presentationData: self.presentationData, openUrl: { [weak self] url in
+            var phoneEntryOtherAccountPhoneNumbers = self.otherAccountPhoneNumbers
+            if case let .doubleBottomReentry(context) = self.purpose {
+                if phoneEntryOtherAccountPhoneNumbers.0?.1 == context.preservedOwnerAccountId {
+                    phoneEntryOtherAccountPhoneNumbers.0 = nil
+                }
+                phoneEntryOtherAccountPhoneNumbers.1.removeAll(where: { $0.1 == context.preservedOwnerAccountId })
+            }
+            controller = AuthorizationSequencePhoneEntryController(sharedContext: self.sharedContext, account: self.account, apiId: self.apiId, apiHash: self.apiHash, isTestingEnvironment: self.account.testingEnvironment, otherAccountPhoneNumbers: phoneEntryOtherAccountPhoneNumbers, network: self.account.network, presentationData: self.presentationData, openUrl: { [weak self] url in
                 self?.openUrl(url)
             }, back: { [weak self] in
                 guard let strongSelf = self else {
@@ -512,6 +533,64 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                         
                                         controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
                                     }
+                                }
+                            }
+                        }))
+                    } else if let reentryContext = strongSelf.doubleBottomReentryContext(for: number) {
+                        strongSelf.actionDisposable.set((verifyAuthorizationCodeForReentry(account: strongSelf.account, code: authorizationCode)
+                        |> deliverOnMainQueue).startStrict(next: { result in
+                            guard let strongSelf = self else {
+                                return
+                            }
+                            switch result {
+                            case .passwordRequired:
+                                controller?.animateSuccess()
+                            case let .verified(peerId):
+                                guard peerId == reentryContext.protectedOwnerPeerId else {
+                                    controller?.inProgress = false
+                                    controller?.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: strongSelf.presentationData.strings.Login_UnknownError, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                                    return
+                                }
+                                let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(
+                                    isTestingEnvironment: strongSelf.account.testingEnvironment,
+                                    masterDatacenterId: strongSelf.account.masterDatacenterId,
+                                    contents: .passwordEntry(hint: "", number: number, code: authorizationCode, suggestReset: false, syncContacts: syncContacts)
+                                )).startStandalone()
+                                controller?.animateSuccess()
+                            }
+                        }, error: { error in
+                            Queue.mainQueue().async {
+                                guard let strongSelf = self, let controller else {
+                                    return
+                                }
+                                controller.inProgress = false
+                                if case .invalidCode = error {
+                                    let text: String
+                                    switch type {
+                                    case .word, .phrase:
+                                        text = strongSelf.presentationData.strings.Login_WrongPhraseError
+                                        controller.selectIncorrectPart()
+                                    default:
+                                        text = strongSelf.presentationData.strings.Login_WrongCodeError
+                                    }
+                                    controller.animateError(text: text)
+                                } else {
+                                    let text: String
+                                    switch error {
+                                    case .limitExceeded:
+                                        text = strongSelf.presentationData.strings.Login_CodeFloodError
+                                    case .invalidCode:
+                                        text = strongSelf.presentationData.strings.Login_InvalidCodeError
+                                    case .generic:
+                                        text = strongSelf.presentationData.strings.Login_UnknownError
+                                    case .codeExpired:
+                                        text = strongSelf.presentationData.strings.Login_CodeExpired
+                                    case .invalidEmailToken:
+                                        text = strongSelf.presentationData.strings.Login_InvalidEmailTokenError
+                                    case .invalidEmailAddress:
+                                        text = strongSelf.presentationData.strings.Login_InvalidEmailAddressError
+                                    }
+                                    controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
                                 }
                             }
                         }))
@@ -915,7 +994,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
         return self.view.window!
     }
     
-    private func passwordEntryController(hint: String, suggestReset: Bool, syncContacts: Bool) -> AuthorizationSequencePasswordEntryController {
+    private func passwordEntryController(hint: String, number: String, suggestReset: Bool, syncContacts: Bool) -> AuthorizationSequencePasswordEntryController {
         var currentController: AuthorizationSequencePasswordEntryController?
         for c in self.viewControllers {
             if let c = c as? AuthorizationSequencePasswordEntryController {
@@ -935,15 +1014,39 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                 
                 let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(isTestingEnvironment: strongSelf.account.testingEnvironment, masterDatacenterId: strongSelf.account.masterDatacenterId, contents: .phoneEntry(countryCode: countryCode, number: ""))).startStandalone()
             })
+        }
+        if let reentryContext = self.doubleBottomReentryContext(for: number) {
+            controller.didForgotWithNoRecovery = true
+            controller.loginWithPassword = { [weak self, weak controller] password in
+                guard let self else {
+                    return
+                }
+                controller?.inProgress = true
+                self.actionDisposable.set((reentryContext.verifyPassword(password)
+                |> deliverOnMainQueue).startStrict(next: { result in
+                    switch result {
+                    case .primary, .decoy:
+                        break
+                    case .invalid, .unavailable:
+                        controller?.inProgress = false
+                        controller?.localPasswordIsInvalid()
+                    }
+                }))
+            }
+            controller.forgot = nil
+            controller.reset = nil
+            controller.updateData(hint: hint, suggestReset: false)
+        } else {
+            controller.didForgotWithNoRecovery = false
             controller.loginWithPassword = { [weak self, weak controller] password in
                 if let strongSelf = self {
                     controller?.inProgress = true
-                    
+
                     strongSelf.actionDisposable.set((authorizeWithPassword(accountManager: strongSelf.sharedContext.accountManager, account: strongSelf.account, password: password, syncContacts: syncContacts) |> deliverOnMainQueue).startStrict(error: { error in
                         Queue.mainQueue().async {
                             if let strongSelf = self, let controller = controller {
                                 controller.inProgress = false
-                                
+
                                 let text: String
                                 switch error {
                                     case .limitExceeded:
@@ -953,7 +1056,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     case .generic:
                                         text = strongSelf.presentationData.strings.Login_UnknownError
                                 }
-                                
+
                                 controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
                                 controller.passwordIsInvalid()
                             }
@@ -961,68 +1064,68 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                     }))
                 }
             }
-        }
-        controller.forgot = { [weak self, weak controller] in
-            if let strongSelf = self, let strongController = controller {
-                strongController.inProgress = true
-                strongSelf.actionDisposable.set((strongSelf.engine.auth.requestTwoStepVerificationPasswordRecoveryCode()
-                |> deliverOnMainQueue).startStrict(next: { pattern in
-                    if let strongSelf = self, let strongController = controller {
+            controller.forgot = { [weak self, weak controller] in
+                if let strongSelf = self, let strongController = controller {
+                    strongController.inProgress = true
+                    strongSelf.actionDisposable.set((strongSelf.engine.auth.requestTwoStepVerificationPasswordRecoveryCode()
+                    |> deliverOnMainQueue).startStrict(next: { pattern in
+                        if let strongSelf = self, let strongController = controller {
+                            strongController.inProgress = false
+
+                            let _ = (strongSelf.engine.auth.state()
+                            |> take(1)
+                            |> deliverOnMainQueue).startStandalone(next: { state in
+                                guard let strongSelf = self else {
+                                    return
+                                }
+                                if case let .unauthorized(state) = state, case let .passwordEntry(hint, number, code, _, syncContacts) = state.contents {
+                                    let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(isTestingEnvironment: strongSelf.account.testingEnvironment, masterDatacenterId: strongSelf.account.masterDatacenterId, contents: .passwordRecovery(hint: hint, number: number, code: code, emailPattern: pattern, syncContacts: syncContacts))).startStandalone()
+                                }
+                            })
+                        }
+                    }, error: { _ in
+                        guard let strongController = controller else {
+                            return
+                        }
+
                         strongController.inProgress = false
 
-                        let _ = (strongSelf.engine.auth.state()
-                        |> take(1)
-                        |> deliverOnMainQueue).startStandalone(next: { state in
-                            guard let strongSelf = self else {
-                                return
-                            }
-                            if case let .unauthorized(state) = state, case let .passwordEntry(hint, number, code, _, syncContacts) = state.contents {
-                                let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(isTestingEnvironment: strongSelf.account.testingEnvironment, masterDatacenterId: strongSelf.account.masterDatacenterId, contents: .passwordRecovery(hint: hint, number: number, code: code, emailPattern: pattern, syncContacts: syncContacts))).startStandalone()
-                            }
-                        })
-                    }
-                }, error: { error in
-                    guard let strongController = controller else {
-                        return
-                    }
-
-                    strongController.inProgress = false
-
-                    strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: strongSelf.presentationData.strings.TwoStepAuth_RecoveryUnavailable, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
-                    strongController.didForgotWithNoRecovery = true
-                }))
+                        strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: strongSelf.presentationData.strings.TwoStepAuth_RecoveryUnavailable, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                        strongController.didForgotWithNoRecovery = true
+                    }))
+                }
             }
-        }
-        controller.reset = { [weak self, weak controller] in
-            if let strongSelf = self, let strongController = controller {
-                strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: suggestReset ? strongSelf.presentationData.strings.TwoStepAuth_RecoveryFailed : strongSelf.presentationData.strings.TwoStepAuth_RecoveryUnavailable, actions: [
-                    TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_Cancel, action: {}),
-                    TextAlertAction(type: .destructiveAction, title: strongSelf.presentationData.strings.Login_ResetAccountProtected_Reset, action: {
-                        if let strongSelf = self, let strongController = controller {
-                            strongController.inProgress = true
-                            strongSelf.actionDisposable.set((performAccountReset(account: strongSelf.account)
-                            |> deliverOnMainQueue).startStrict(next: {
-                                if let strongController = controller {
-                                    strongController.inProgress = false
-                                }
-                            }, error: { error in
-                                if let strongSelf = self, let strongController = controller {
-                                    strongController.inProgress = false
-                                    let text: String
-                                    switch error {
-                                        case .generic:
-                                            text = strongSelf.presentationData.strings.Login_UnknownError
-                                        case .limitExceeded:
-                                            text = strongSelf.presentationData.strings.Login_ResetAccountProtected_LimitExceeded
+            controller.reset = { [weak self, weak controller] in
+                if let strongSelf = self, let strongController = controller {
+                    strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: suggestReset ? strongSelf.presentationData.strings.TwoStepAuth_RecoveryFailed : strongSelf.presentationData.strings.TwoStepAuth_RecoveryUnavailable, actions: [
+                        TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_Cancel, action: {}),
+                        TextAlertAction(type: .destructiveAction, title: strongSelf.presentationData.strings.Login_ResetAccountProtected_Reset, action: {
+                            if let strongSelf = self, let strongController = controller {
+                                strongController.inProgress = true
+                                strongSelf.actionDisposable.set((performAccountReset(account: strongSelf.account)
+                                |> deliverOnMainQueue).startStrict(next: {
+                                    if let strongController = controller {
+                                        strongController.inProgress = false
                                     }
-                                    strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
-                                }
-                            }))
-                        }
-                    })]), in: .window(.root))
+                                }, error: { error in
+                                    if let strongSelf = self, let strongController = controller {
+                                        strongController.inProgress = false
+                                        let text: String
+                                        switch error {
+                                            case .generic:
+                                                text = strongSelf.presentationData.strings.Login_UnknownError
+                                            case .limitExceeded:
+                                                text = strongSelf.presentationData.strings.Login_ResetAccountProtected_LimitExceeded
+                                        }
+                                        strongController.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+                                    }
+                                }))
+                            }
+                        })]), in: .window(.root))
+                }
             }
+            controller.updateData(hint: hint, suggestReset: suggestReset)
         }
-        controller.updateData(hint: hint, suggestReset: suggestReset)
         return controller
     }
     
@@ -1252,7 +1355,13 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                     if let _ = self.viewControllers.last as? AuthorizationSequenceSplashController {
                     } else {
                         var controllers: [ViewController] = []
-                        if self.otherAccountPhoneNumbers.1.isEmpty {
+                        if self.otherAccountPhoneNumbers.1.isEmpty || {
+                            if case .doubleBottomReentry = self.purpose {
+                                return true
+                            } else {
+                                return false
+                            }
+                        }() {
                             controllers.append(self.splashController())
                         } else {
                             controllers.append(self.phoneEntryController(countryCode: AuthorizationSequenceCountrySelectionController.defaultCountryCode(), number: "", splashController: nil))
@@ -1316,12 +1425,12 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                     } else {
                         self.setViewControllers(controllers, animated: !self.viewControllers.isEmpty)
                     }
-                case let .passwordEntry(hint, _, _, suggestReset, syncContacts):
+                case let .passwordEntry(hint, number, _, suggestReset, syncContacts):
                     var controllers: [ViewController] = []
                     if !self.otherAccountPhoneNumbers.1.isEmpty {
                         controllers.append(self.splashController())
                     }
-                    controllers.append(self.passwordEntryController(hint: hint, suggestReset: suggestReset, syncContacts: syncContacts))
+                    controllers.append(self.passwordEntryController(hint: hint, number: number, suggestReset: suggestReset, syncContacts: syncContacts))
                     self.setViewControllers(controllers, animated: !self.viewControllers.isEmpty)
                 case let .passwordRecovery(_, _, _, emailPattern, syncContacts):
                     var controllers: [ViewController] = []

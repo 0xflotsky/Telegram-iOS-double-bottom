@@ -247,6 +247,11 @@ final class AuthorizationSequencePasswordEntryControllerNode: ASDisplayNode, UIT
         self.clearOnce = true
     }
 
+    func localPasswordIsInvalid() {
+        self.clearOnce = true
+        self.animateError()
+    }
+
     func resetPasswordInput() {
         self.clearOnce = false
         self.codeField.textField.text = nil

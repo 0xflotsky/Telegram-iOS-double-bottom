@@ -129,6 +129,13 @@ final class AuthorizationSequencePasswordEntryController: ViewController {
             self.controllerNode.passwordIsInvalid()
         }
     }
+
+    func localPasswordIsInvalid() {
+        if self.isNodeLoaded {
+            self.hapticFeedback.error()
+            self.controllerNode.localPasswordIsInvalid()
+        }
+    }
     
     override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)

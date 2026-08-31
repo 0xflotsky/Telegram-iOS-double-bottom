@@ -1132,6 +1132,103 @@ public func authorizeWithCode(accountManager: AccountManager<TelegramAccountMana
     |> switchToLatest
 }
 
+public enum AuthorizationCodeReentryVerificationResult {
+    case passwordRequired
+    case verified(peerId: PeerId)
+}
+
+public func verifyAuthorizationCodeForReentry(account: UnauthorizedAccount, code: AuthorizationCode) -> Signal<AuthorizationCodeReentryVerificationResult, AuthorizationCodeVerificationError> {
+    return account.postbox.transaction { transaction -> Signal<AuthorizationCodeReentryVerificationResult, AuthorizationCodeVerificationError> in
+        guard let state = transaction.getState() as? UnauthorizedAccountState,
+              case let .confirmationCodeEntry(number, _, hash, _, _, syncContacts, _, _) = state.contents else {
+            return .fail(.generic)
+        }
+
+        var flags: Int32 = 0
+        var phoneCode: String?
+        var emailVerification: Api.EmailVerification?
+        switch code {
+        case let .phoneCode(code):
+            flags = 1 << 0
+            phoneCode = code
+        case let .emailVerification(verification):
+            flags = 1 << 1
+            switch verification {
+            case let .emailCode(code):
+                emailVerification = .emailVerificationCode(.init(code: code))
+            case let .appleToken(token):
+                emailVerification = .emailVerificationApple(.init(token: token))
+            case let .googleToken(token):
+                emailVerification = .emailVerificationGoogle(.init(token: token))
+            }
+        }
+
+        return account.network.request(Api.functions.auth.signIn(flags: flags, phoneNumber: number, phoneCodeHash: hash, phoneCode: phoneCode, emailVerification: emailVerification), automaticFloodWait: false)
+        |> map { authorization -> (String, PeerId?, Bool) in
+            switch authorization {
+            case let .authorization(data):
+                return ("", TelegramUser(user: data.user).id, false)
+            case .authorizationSignUpRequired:
+                return ("", nil, false)
+            }
+        }
+        |> `catch` { error -> Signal<(String, PeerId?, Bool), AuthorizationCodeVerificationError> in
+            switch (error.errorCode, error.errorDescription ?? "") {
+            case (401, "SESSION_PASSWORD_NEEDED"):
+                return account.network.request(Api.functions.account.getPassword(), automaticFloodWait: false)
+                |> mapError { error -> AuthorizationCodeVerificationError in
+                    if error.errorDescription.hasPrefix("FLOOD_WAIT") {
+                        return .limitExceeded
+                    } else {
+                        return .generic
+                    }
+                }
+                |> map { result -> (String, PeerId?, Bool) in
+                    switch result {
+                    case let .password(passwordData):
+                        return (passwordData.hint ?? "", nil, true)
+                    }
+                }
+            case let (_, description):
+                if description.hasPrefix("FLOOD_WAIT") {
+                    return .fail(.limitExceeded)
+                } else if description == "PHONE_CODE_INVALID" || description == "EMAIL_CODE_INVALID" {
+                    return .fail(.invalidCode)
+                } else if description == "CODE_HASH_EXPIRED" || description == "PHONE_CODE_EXPIRED" {
+                    return .fail(.codeExpired)
+                } else if description == "EMAIL_TOKEN_INVALID" {
+                    return .fail(.invalidEmailToken)
+                } else if description == "EMAIL_ADDRESS_INVALID" {
+                    return .fail(.invalidEmailAddress)
+                } else {
+                    return .fail(.generic)
+                }
+            }
+        }
+        |> mapToSignal { hint, peerId, passwordRequired -> Signal<AuthorizationCodeReentryVerificationResult, AuthorizationCodeVerificationError> in
+            guard peerId != nil || passwordRequired else {
+                return .fail(.generic)
+            }
+            if let peerId {
+                return .single(.verified(peerId: peerId))
+            }
+            return account.postbox.transaction { transaction -> AuthorizationCodeReentryVerificationResult in
+                transaction.setState(UnauthorizedAccountState(
+                    isTestingEnvironment: account.testingEnvironment,
+                    masterDatacenterId: account.masterDatacenterId,
+                    contents: .passwordEntry(hint: hint, number: number, code: code, suggestReset: false, syncContacts: syncContacts)
+                ))
+                return .passwordRequired
+            }
+            |> mapError { _ -> AuthorizationCodeVerificationError in
+            }
+        }
+    }
+    |> mapError { _ -> AuthorizationCodeVerificationError in
+    }
+    |> switchToLatest
+}
+
 public func beginSignUp(account: UnauthorizedAccount, data: AuthorizationSignUpData) -> Signal<Never, NoError> {
     return account.postbox.transaction { transaction -> Void in
         transaction.setState(UnauthorizedAccountState(isTestingEnvironment: account.testingEnvironment, masterDatacenterId: account.masterDatacenterId, contents: .signUp(number: data.number, codeHash: data.codeHash, firstName: "", lastName: "", termsOfService: data.termsOfService, syncContacts: data.syncContacts)))

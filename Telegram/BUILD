@@ -316,13 +316,6 @@ filegroup(
     ]),
 )
 
-filegroup(
-    name = "BlackDefaultAppIcon",
-    srcs = glob([
-        "Telegram-iOS/BlackTelegram.icon/**/*",
-    ], exclude = ["Telegram-iOS/BlackTelegram.icon/**/.*"]),
-)
-
 alternate_icon_folders = [
     "BlackIcon",
     "BlackClassicIcon",
@@ -1784,7 +1777,7 @@ ios_application(
         ":RequiredDeviceCapabilitiesPlist",
         ":UrlTypesInfoPlist",
     ],
-    app_icons = [":BlackDefaultAppIcon"],
+    app_icons = [":{}_icon".format(name) for name in composer_icon_folders],
     alternate_icons = [
         ":{}".format(name) for name in alternate_icon_folders
     ],

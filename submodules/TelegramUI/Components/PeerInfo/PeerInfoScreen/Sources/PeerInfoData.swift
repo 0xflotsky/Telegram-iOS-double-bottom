@@ -884,11 +884,11 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
         )
     }
     
-    let hasPassword: Signal<Bool?, NoError>
+    let hasPasswordValue: Signal<Bool?, NoError>
     if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
-        hasPassword = .single(true)
+        hasPasswordValue = .single(true)
     } else {
-        hasPassword = .single(nil) |> then(
+        hasPasswordValue = .single(nil) |> then(
             context.engine.auth.twoStepVerificationConfiguration()
             |> map { configuration -> Bool? in
                 var notSet = false
@@ -904,6 +904,7 @@ func peerInfoScreenSettingsData(context: AccountContext, peerId: EnginePeer.Id, 
             }
         )
     }
+    let hasPassword = hasPasswordValue
     |> distinctUntilChanged
     
     let storyListContext = PeerStoryListContext(account: context.account, peerId: peerId, isArchived: false, folderId: nil)

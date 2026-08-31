@@ -2,12 +2,22 @@ import TelegramCore
 import TelegramUIPreferences
 import SwiftSignalKit
 
+public enum DoubleBottomAccessState: Equatable {
+    case unlocked
+    case secureExited
+}
+
 public final class DoubleBottomContext {
     private let accountManager: AccountManager<TelegramAccountManagerTypes>
     private let currentProfilePromise = Promise<DoubleBottomProfile>()
+    private let accessStatePromise = ValuePromise<DoubleBottomAccessState>(.unlocked, ignoreRepeated: true)
 
     public var currentProfile: Signal<DoubleBottomProfile, NoError> {
         return self.currentProfilePromise.get()
+    }
+
+    public var accessState: Signal<DoubleBottomAccessState, NoError> {
+        return self.accessStatePromise.get()
     }
 
     public init(accountManager: AccountManager<TelegramAccountManagerTypes>) {
@@ -25,5 +35,15 @@ public final class DoubleBottomContext {
             settings.currentProfile = profile
             return settings
         }
+    }
+
+    public func secureExit() {
+        assert(Queue.mainQueue().isCurrent())
+        self.accessStatePromise.set(.secureExited)
+    }
+
+    func completeLocalUnlock() {
+        assert(Queue.mainQueue().isCurrent())
+        self.accessStatePromise.set(.unlocked)
     }
 }

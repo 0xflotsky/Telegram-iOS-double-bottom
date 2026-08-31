@@ -829,6 +829,10 @@ public class Window1 {
         if self.isInteractionBlocked {
             return nil
         }
+
+        if let privacyCoveringView = self.privacyCoveringView, !privacyCoveringView.isHidden, privacyCoveringView.superview != nil, privacyCoveringView.frame.contains(point) {
+            return privacyCoveringView.hitTest(point, with: event)
+        }
                 
         if let result = self.topPresentationContext.hitTest(view: self.hostView.containerView, point: point, with: event) {
             return result
@@ -1015,6 +1019,23 @@ public class Window1 {
                     if !self.windowLayout.size.width.isZero {
                         coveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
                         coveringView.updateLayout(self.windowLayout.size)
+                    }
+                }
+            }
+        }
+    }
+
+    public var privacyCoveringView: WindowCoveringView? {
+        didSet {
+            if self.privacyCoveringView !== oldValue {
+                oldValue?.removeFromSuperview()
+
+                if let privacyCoveringView = self.privacyCoveringView {
+                    privacyCoveringView.layer.zPosition = 1000000.0
+                    self.hostView.containerView.addSubview(privacyCoveringView)
+                    if !self.windowLayout.size.width.isZero {
+                        privacyCoveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
+                        privacyCoveringView.updateLayout(self.windowLayout.size)
                     }
                 }
             }
@@ -1254,6 +1275,11 @@ public class Window1 {
                 if let coveringView = self.coveringView {
                     coveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
                     coveringView.updateLayout(self.windowLayout.size)
+                }
+
+                if let privacyCoveringView = self.privacyCoveringView {
+                    privacyCoveringView.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
+                    privacyCoveringView.updateLayout(self.windowLayout.size)
                 }
                 
                 if let image = self.badgeView.image {

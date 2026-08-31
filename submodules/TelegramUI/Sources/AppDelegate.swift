@@ -1147,7 +1147,10 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 })
             })
             setPresentationCall = { call in
-                notificationManager.setNotificationCall(call, strings: sharedContext.currentPresentationData.with({ $0 }).strings)
+                let visibleCall = call.flatMap { call -> PresentationCall? in
+                    return sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: call.context.account.peerId, peerId: call.peerId) ? call : nil
+                }
+                notificationManager.setNotificationCall(visibleCall, strings: sharedContext.currentPresentationData.with({ $0 }).strings)
             }
             let liveLocationPolling = self.context.get()
             |> mapToSignal { context -> Signal<AccountRecordId?, NoError> in
@@ -2766,6 +2769,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let signal = self.sharedContextPromise.get()
         |> take(1)
         |> mapToSignal { sharedApplicationContext -> Signal<AuthorizedApplicationContext, NoError> in
+            guard sharedApplicationContext.sharedContext.doubleBottomCanRouteNotification(accountId: accountId, peerId: peerId) else {
+                return .complete()
+            }
             if let accountId = accountId {
                 sharedApplicationContext.sharedContext.switchToAccount(id: accountId)
                 return self.authorizedContext()
@@ -2789,6 +2795,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         |> take(1)
         |> deliverOnMainQueue
         |> mapToSignal { sharedApplicationContext -> Signal<AuthorizedApplicationContext, NoError> in
+            guard sharedApplicationContext.sharedContext.doubleBottomCanRouteNotification(accountId: accountId, peerId: peerId) else {
+                return .complete()
+            }
             if let accountId = accountId {
                 sharedApplicationContext.sharedContext.switchToAccount(id: accountId)
                 return self.authorizedContext()
@@ -2815,6 +2824,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         |> take(1)
         |> deliverOnMainQueue
         |> mapToSignal { sharedApplicationContext -> Signal<AuthorizedApplicationContext, NoError> in
+            guard sharedApplicationContext.sharedContext.doubleBottomCanRouteNotification(accountId: accountId, peerId: nil) else {
+                return .complete()
+            }
             if let accountId = accountId {
                 sharedApplicationContext.sharedContext.switchToAccount(id: accountId)
                 return self.authorizedContext()
@@ -2866,6 +2878,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 |> take(1)
                 |> deliverOnMainQueue
                 |> mapToSignal { sharedContext -> Signal<Void, NoError> in
+                    guard sharedContext.sharedContext.doubleBottomCanRouteNotification(accountId: accountId, peerId: peerId) else {
+                        return .complete()
+                    }
                     sharedContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: true)
                     return sharedContext.sharedContext.activeAccountContexts
                     |> mapToSignal { _, contexts, _ -> Signal<Account, NoError> in
@@ -3029,9 +3044,18 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let _ = (accountIdFromNotification(notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if let context = self.contextValue {
+                let peerId = peerIdFromNotification(notification)?.peerId
+                guard context.context.sharedContext.doubleBottomCanRouteNotification(accountId: accountId, peerId: peerId) else {
+                    completionHandler([])
+                    return
+                }
                 if let accountId = accountId, context.context.account.id != accountId || notification.request.content.userInfo["url"] != nil {
                     completionHandler([.alert])
+                } else {
+                    completionHandler([])
                 }
+            } else {
+                completionHandler([])
             }
         })
     }

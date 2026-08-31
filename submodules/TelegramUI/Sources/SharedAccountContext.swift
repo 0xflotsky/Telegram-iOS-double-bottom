@@ -2019,6 +2019,42 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.doubleBottomContext.secureExit()
         return true
     }
+
+    public func doubleBottomCanRouteNotification(accountId: AccountRecordId?, peerId: EnginePeer.Id?) -> Bool {
+        guard let currentContext = self.activeAccountsValue?.primary else {
+            return false
+        }
+        let targetContext: AccountContext
+        if let accountId {
+            guard let context = self.activeAccountsValue?.accounts.first(where: { $0.0 == accountId })?.1 else {
+                return false
+            }
+            targetContext = context
+        } else {
+            targetContext = currentContext
+        }
+
+        if targetContext.account.id != currentContext.account.id {
+            if self.doubleBottomPolicy.isOwner(accountPeerId: targetContext.account.peerId) {
+                return false
+            }
+            if self.doubleBottomPolicy.currentMode(accountPeerId: currentContext.account.peerId) != .ordinary {
+                return false
+            }
+        }
+
+        switch self.doubleBottomPolicy.currentMode(accountPeerId: targetContext.account.peerId) {
+        case .ordinary, .primary:
+            return true
+        case .secureExited:
+            return false
+        case .decoy:
+            guard let peerId else {
+                return false
+            }
+            return self.doubleBottomPolicy.canAccess(accountPeerId: targetContext.account.peerId, peerId: peerId)
+        }
+    }
     
     public func openCreateGroupCallUI(context: AccountContext, peerIds: [EnginePeer.Id], parentController: ViewController) {
         let _ = (context.engine.data.get(

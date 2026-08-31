@@ -1613,6 +1613,7 @@ public protocol SharedAccountContext: AnyObject {
     func makeDoubleBottomSettingsController(context: AccountContext) -> ViewController?
     func makeDoubleBottomDecoyPasswordController(context: AccountContext) -> ViewController?
     func performDoubleBottomSecureExitIfOwner(accountPeerId: EnginePeer.Id) -> Bool
+    func doubleBottomCanRouteNotification(accountId: AccountRecordId?, peerId: EnginePeer.Id?) -> Bool
     
     func openCreateGroupCallUI(context: AccountContext, peerIds: [EnginePeer.Id], parentController: ViewController)
     

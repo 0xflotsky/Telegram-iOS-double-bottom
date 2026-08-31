@@ -137,9 +137,17 @@ final class AuthorizedApplicationContext {
     }
     
     var applicationBadge: Signal<Int32, NoError> {
-        return renderedTotalUnreadCount(accountManager: self.context.sharedContext.accountManager, engine: self.context.engine)
-        |> map {
-            $0.0
+        return combineLatest(
+            renderedTotalUnreadCount(accountManager: self.context.sharedContext.accountManager, engine: self.context.engine),
+            self.context.sharedContext.doubleBottomPeerPolicy.updates
+        )
+        |> map { count, _ in
+            let mode = self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId)
+            if mode == .ordinary || mode == .primary {
+                return count.0
+            } else {
+                return 0
+            }
         }
     }
     

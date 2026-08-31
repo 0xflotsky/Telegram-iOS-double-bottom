@@ -14,11 +14,23 @@ private final class DoubleBottomSettingsControllerNode: ASDisplayNode {
 
     override init() {
         let tableView = UITableView(frame: .zero, style: .insetGrouped)
+        tableView.contentInsetAdjustmentBehavior = .never
         self.tableView = tableView
         super.init()
         self.setViewBlock {
             return tableView
         }
+    }
+
+    func updateLayout(_ layout: ContainerViewLayout, navigationHeight: CGFloat) {
+        let contentInsets = UIEdgeInsets(
+            top: navigationHeight,
+            left: 0.0,
+            bottom: layout.insets(options: [.input]).bottom,
+            right: 0.0
+        )
+        self.tableView.contentInset = contentInsets
+        self.tableView.verticalScrollIndicatorInsets = contentInsets
     }
 }
 
@@ -117,8 +129,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         super.containerLayoutUpdated(layout, transition: transition)
         transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
         let navigationHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
-        self.controllerNode.tableView.contentInset.top = navigationHeight
-        self.controllerNode.tableView.verticalScrollIndicatorInsets.top = navigationHeight
+        self.controllerNode.updateLayout(layout, navigationHeight: navigationHeight)
     }
 
     private func reloadRows() {
@@ -519,8 +530,7 @@ final class DoubleBottomDecoyPasswordController: ViewController, UITableViewData
         super.containerLayoutUpdated(layout, transition: transition)
         transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
         let navigationHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
-        self.controllerNode.tableView.contentInset.top = navigationHeight
-        self.controllerNode.tableView.verticalScrollIndicatorInsets.top = navigationHeight
+        self.controllerNode.updateLayout(layout, navigationHeight: navigationHeight)
     }
 
     func numberOfSections(in tableView: UITableView) -> Int {

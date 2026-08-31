@@ -7,6 +7,7 @@ import Postbox
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
+import TelegramUIPreferences
 
 private final class DoubleBottomSettingsControllerNode: ASDisplayNode {
     let tableView: UITableView
@@ -88,7 +89,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
         let navigationHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
         self.controllerNode.tableView.contentInset.top = navigationHeight
-        self.controllerNode.tableView.scrollIndicatorInsets.top = navigationHeight
+        self.controllerNode.tableView.verticalScrollIndicatorInsets.top = navigationHeight
     }
 
     private func reloadRows() {
@@ -204,12 +205,12 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         alert.addTextField { field in
             field.placeholder = "Primary password"
             field.isSecureTextEntry = true
-            field.textContentType = .newPassword
+            field.textContentType = UITextContentType.newPassword
         }
         alert.addTextField { field in
             field.placeholder = "Decoy password"
             field.isSecureTextEntry = true
-            field.textContentType = .newPassword
+            field.textContentType = UITextContentType.newPassword
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { [weak self, weak alert] _ in
@@ -247,7 +248,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         alert.addTextField { field in
             field.placeholder = "New password"
             field.isSecureTextEntry = true
-            field.textContentType = .newPassword
+            field.textContentType = UITextContentType.newPassword
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { [weak self, weak alert] _ in
@@ -399,7 +400,7 @@ final class DoubleBottomDecoyPasswordController: ViewController, UITableViewData
         transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
         let navigationHeight = self.navigationLayout(layout: layout).navigationFrame.maxY
         self.controllerNode.tableView.contentInset.top = navigationHeight
-        self.controllerNode.tableView.scrollIndicatorInsets.top = navigationHeight
+        self.controllerNode.tableView.verticalScrollIndicatorInsets.top = navigationHeight
     }
 
     func numberOfSections(in tableView: UITableView) -> Int {
@@ -427,7 +428,7 @@ final class DoubleBottomDecoyPasswordController: ViewController, UITableViewData
         alert.addTextField { field in
             field.placeholder = "New password"
             field.isSecureTextEntry = true
-            field.textContentType = .newPassword
+            field.textContentType = UITextContentType.newPassword
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { [weak self, weak alert] _ in

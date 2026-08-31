@@ -15,9 +15,10 @@ private final class DoubleBottomSettingsControllerNode: ASDisplayNode {
     override init() {
         let tableView = UITableView(frame: .zero, style: .insetGrouped)
         self.tableView = tableView
-        super.init(viewBlock: {
+        super.init()
+        self.setViewBlock {
             return tableView
-        })
+        }
     }
 }
 

@@ -333,7 +333,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.doubleBottomPolicy = doubleBottomPolicy
         self.doubleBottomProfileUIState = doubleBottomProfileUIState
         self.doubleBottomProfileUIStateImpl = doubleBottomProfileUIState
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState)
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, presentationData: initialPresentationDataAndSettings.presentationData, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

@@ -246,6 +246,12 @@ final class AuthorizationSequencePasswordEntryControllerNode: ASDisplayNode, UIT
     func passwordIsInvalid() {
         self.clearOnce = true
     }
+
+    func resetPasswordInput() {
+        self.clearOnce = false
+        self.codeField.textField.text = nil
+        self.proceedNode.isEnabled = false
+    }
     
     @objc func textDidChange() {
         self.proceedNode.isEnabled = !(self.codeField.textField.text ?? "").isEmpty

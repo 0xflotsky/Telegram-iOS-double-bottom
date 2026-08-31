@@ -68,7 +68,7 @@ extension PeerInfoScreenNode {
     }
     
     func logoutAccount(id: AccountRecordId) {
-        if id == self.context.account.id, self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
+        if id == self.context.account.id, self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .primary, self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
             return
         }
         let controller = ActionSheetController(presentationData: self.presentationData)
@@ -81,6 +81,9 @@ extension PeerInfoScreenNode {
         items.append(ActionSheetButtonItem(title: self.presentationData.strings.Settings_Logout, color: .destructive, action: { [weak self] in
             dismissAction()
             if let strongSelf = self {
+                if id == strongSelf.context.account.id, strongSelf.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: strongSelf.context.account.peerId) {
+                    return
+                }
                 let _ = logoutFromAccount(id: id, accountManager: strongSelf.context.sharedContext.accountManager, alreadyLoggedOutRemotely: false).startStandalone()
             }
         }))

@@ -249,7 +249,7 @@ extension PeerInfoScreenNode {
                 }
             })
         case .logout:
-            if self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
+            if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .primary, self.context.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId) {
                 return
             }
             if case let .user(user) = self.data?.peer, let phoneNumber = user.phone {

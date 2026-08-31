@@ -1401,7 +1401,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             if let authContextValue = self.authContextValue {
                 authContextValue.account.shouldBeServiceTaskMaster.set(.single(.never))
                 if authContextValue.authorizationCompleted {
-                    let accountId = authContextValue.account.id
+                    let accountId = authContextValue.authorizationTargetAccountId
                     let _ = (self.context.get()
                     |> filter { context in
                         return context?.context.account.id == accountId

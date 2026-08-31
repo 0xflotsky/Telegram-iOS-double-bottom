@@ -39,6 +39,7 @@ final class UnauthorizedApplicationContext {
     let account: UnauthorizedAccount
     
     let rootController: AuthorizationSequenceController
+    let authorizationTargetAccountId: AccountRecordId
     
     let isReady = Promise<Bool>()
     
@@ -49,6 +50,12 @@ final class UnauthorizedApplicationContext {
     init(apiId: Int32, apiHash: String, sharedContext: SharedAccountContextImpl, account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), purpose: AuthorizationSequencePurpose) {
         self.sharedContext = sharedContext
         self.account = account
+        switch purpose {
+        case .normal:
+            self.authorizationTargetAccountId = account.id
+        case let .doubleBottomReentry(context):
+            self.authorizationTargetAccountId = context.preservedOwnerAccountId
+        }
         let presentationData = sharedContext.currentPresentationData.with { $0 }
         
         var authorizationCompleted: (() -> Void)?

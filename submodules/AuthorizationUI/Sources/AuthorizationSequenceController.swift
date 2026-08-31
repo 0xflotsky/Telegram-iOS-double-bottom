@@ -1034,7 +1034,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                 |> deliverOnMainQueue).startStrict(next: { result in
                     switch result {
                     case .primary, .decoy:
-                        break
+                        self.authorizationCompleted()
                     case .invalid, .unavailable:
                         controller?.inProgress = false
                         controller?.localPasswordIsInvalid()

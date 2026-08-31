@@ -112,6 +112,18 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         }
     }
 
+    public func shouldDisplaySettings(accountPeerId: PeerId) -> Bool {
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot, snapshot.isPrivateStoreAvailable else {
+                return false
+            }
+            guard let ownerPeerId = snapshot.ownerPeerId else {
+                return true
+            }
+            return ownerPeerId == accountPeerId.toInt64() && snapshot.accessState == .unlocked && snapshot.profile == .primary
+        }
+    }
+
     public func canAccess(accountPeerId: PeerId, peerId: PeerId) -> Bool {
         return self.snapshotValue.with { snapshot in
             guard let snapshot else {

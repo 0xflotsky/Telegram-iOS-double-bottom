@@ -254,6 +254,10 @@ extension PeerInfoScreenNode {
                     self.controller?.push(logoutOptionsController(context: self.context, navigationController: navigationController, canAddAccounts: true, phoneNumber: phoneNumber))
                 }
             }
+        case .doubleBottom:
+            if let controller = self.context.sharedContext.makeDoubleBottomSettingsController(context: self.context) {
+                push(controller)
+            }
         case .rememberPassword:
             let context = self.context
             let controller = TwoFactorDataInputScreen(sharedContext: self.context.sharedContext, engine: .authorized(self.context.engine), mode: .rememberPassword(doneText: self.presentationData.strings.TwoFactorSetup_Done_Action), stateUpdated: { _ in

@@ -1610,6 +1610,7 @@ public protocol SharedAccountContext: AnyObject {
     func makeChannelMembersSearchController(params: ChannelMembersSearchControllerParams) -> ChannelMembersSearchController
     
     func makeDebugSettingsController(context: AccountContext?) -> ViewController?
+    func makeDoubleBottomSettingsController(context: AccountContext) -> ViewController?
     
     func openCreateGroupCallUI(context: AccountContext, peerIds: [EnginePeer.Id], parentController: ViewController)
     

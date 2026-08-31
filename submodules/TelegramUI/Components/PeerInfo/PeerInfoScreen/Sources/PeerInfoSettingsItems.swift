@@ -21,6 +21,7 @@ enum SettingsSection: Int, CaseIterable {
     case proxy
     case apps
     case shortcuts
+    case doubleBottom
     case advanced
     case payment
     case extra
@@ -220,6 +221,12 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 4, text: presentationData.strings.Settings_ChatFolders, icon: PresentationResourcesSettings.chatFolders, action: {
         interaction.openSettings(.chatFolders)
     }))
+
+    if context.sharedContext.doubleBottomPeerPolicy.shouldDisplaySettings(accountPeerId: context.account.peerId) {
+        items[.doubleBottom]!.append(PeerInfoScreenDisclosureItem(id: 0, text: "Double Bottom", icon: PresentationResourcesSettings.security, action: {
+            interaction.openSettings(.doubleBottom)
+        }))
+    }
     
     let notificationsWarning: Bool
     if let settings = data.globalSettings {

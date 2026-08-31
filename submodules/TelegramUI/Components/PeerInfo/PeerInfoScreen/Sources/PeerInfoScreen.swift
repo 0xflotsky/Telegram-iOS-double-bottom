@@ -179,6 +179,7 @@ enum PeerInfoSettingsSection {
     case username
     case addAccount
     case logout
+    case doubleBottom
     case rememberPassword
     case emojiStatus
     case profileColor

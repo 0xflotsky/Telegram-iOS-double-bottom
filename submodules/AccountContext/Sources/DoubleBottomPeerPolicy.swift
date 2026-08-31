@@ -14,5 +14,6 @@ public protocol DoubleBottomPeerPolicy: AnyObject {
     func currentMode(accountPeerId: PeerId) -> DoubleBottomPeerPolicyMode
     func mode(accountPeerId: PeerId) -> Signal<DoubleBottomPeerPolicyMode, NoError>
     func isOwner(accountPeerId: PeerId) -> Bool
+    func shouldDisplaySettings(accountPeerId: PeerId) -> Bool
     func canAccess(accountPeerId: PeerId, peerId: PeerId) -> Bool
 }

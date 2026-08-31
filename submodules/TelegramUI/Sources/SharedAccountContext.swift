@@ -1997,6 +1997,13 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         let controller = debugController(sharedContext: self, context: context)
         return controller
     }
+
+    public func makeDoubleBottomSettingsController(context: AccountContext) -> ViewController? {
+        guard self.doubleBottomPolicy.shouldDisplaySettings(accountPeerId: context.account.peerId) else {
+            return nil
+        }
+        return DoubleBottomSettingsController(context: context, sharedContext: self)
+    }
     
     public func openCreateGroupCallUI(context: AccountContext, peerIds: [EnginePeer.Id], parentController: ViewController) {
         let _ = (context.engine.data.get(

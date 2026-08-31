@@ -191,9 +191,15 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                 }
                 phoneEntryOtherAccountPhoneNumbers.1.removeAll(where: { $0.1 == context.preservedOwnerAccountId })
             }
+            let allowPasskeyLogin: Bool
+            if case .normal = self.purpose {
+                allowPasskeyLogin = true
+            } else {
+                allowPasskeyLogin = false
+            }
             controller = AuthorizationSequencePhoneEntryController(sharedContext: self.sharedContext, account: self.account, apiId: self.apiId, apiHash: self.apiHash, isTestingEnvironment: self.account.testingEnvironment, otherAccountPhoneNumbers: phoneEntryOtherAccountPhoneNumbers, network: self.account.network, presentationData: self.presentationData, openUrl: { [weak self] url in
                 self?.openUrl(url)
-            }, back: { [weak self] in
+            }, allowPasskeyLogin: allowPasskeyLogin, back: { [weak self] in
                 guard let strongSelf = self else {
                     return
                 }
@@ -336,7 +342,8 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                     }
                 })
             }
-            controller.loginWithPasskey = { [weak self, weak controller] passkey, syncContacts in
+            if case .normal = self.purpose {
+                controller.loginWithPasskey = { [weak self, weak controller] passkey, syncContacts in
                 guard let self else {
                     return
                 }
@@ -1032,6 +1039,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                         controller?.localPasswordIsInvalid()
                     }
                 }))
+                }
             }
             controller.forgot = nil
             controller.reset = nil

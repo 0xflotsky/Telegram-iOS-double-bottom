@@ -30,6 +30,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     private let network: Network
     private let presentationData: PresentationData
     private let openUrl: (String) -> Void
+    private let allowPasskeyLogin: Bool
     
     private let back: () -> Void
     
@@ -64,7 +65,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     
     private let hapticFeedback = HapticFeedback()
     
-    public init(sharedContext: SharedAccountContext, account: UnauthorizedAccount?, countriesConfiguration: CountriesConfiguration? = nil, apiId: Int32, apiHash: String, isTestingEnvironment: Bool, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), network: Network, presentationData: PresentationData, openUrl: @escaping (String) -> Void, back: @escaping () -> Void) {
+    public init(sharedContext: SharedAccountContext, account: UnauthorizedAccount?, countriesConfiguration: CountriesConfiguration? = nil, apiId: Int32, apiHash: String, isTestingEnvironment: Bool, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), network: Network, presentationData: PresentationData, openUrl: @escaping (String) -> Void, allowPasskeyLogin: Bool = true, back: @escaping () -> Void) {
         self.sharedContext = sharedContext
         self.account = account
         self.apiId = apiId
@@ -74,6 +75,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         self.network = network
         self.presentationData = presentationData
         self.openUrl = openUrl
+        self.allowPasskeyLogin = allowPasskeyLogin
         self.back = back
                 
         super.init(navigationBarPresentationData: NavigationBarPresentationData(theme: AuthorizationSequenceController.navigationBarTheme(presentationData.theme), strings: NavigationBarStrings(presentationStrings: presentationData.strings)))
@@ -204,6 +206,9 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     }
     
     private func loadAndPresentPasskey(force: Bool) {
+        guard self.allowPasskeyLogin else {
+            return
+        }
         if #available(iOS 16.0, *) {
             Task { @MainActor [weak self] in
                 guard let self, let account = self.account else {

@@ -140,15 +140,17 @@ final class DoubleBottomSecureExitCoordinator {
     private let context: DoubleBottomContext
     private let credentialStore: DoubleBottomCredentialStore
     private let privateStore: DoubleBottomPrivateStore
+    private let policy: DoubleBottomPolicy
     private var accessStateDisposable: Disposable?
     private let verificationDisposable = MetaDisposable()
     private let applyProfileDisposable = MetaDisposable()
 
-    init(window: Window1?, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore) {
+    init(window: Window1?, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy) {
         self.window = window
         self.context = context
         self.credentialStore = credentialStore
         self.privateStore = privateStore
+        self.policy = policy
         self.coveringView.unlock = { [weak self] password in
             self?.verify(password: password)
         }
@@ -201,6 +203,12 @@ final class DoubleBottomSecureExitCoordinator {
             |> ignoreValues)
             |> then(
                 self.context.currentProfile
+                |> filter { $0 == profile }
+                |> take(1)
+                |> ignoreValues
+            )
+            |> then(
+                self.policy.currentProfile
                 |> filter { $0 == profile }
                 |> take(1)
                 |> ignoreValues

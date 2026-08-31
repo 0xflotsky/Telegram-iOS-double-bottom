@@ -52,6 +52,13 @@ public final class DoubleBottomPrivateStore {
     private let queue = Queue(name: "DoubleBottomPrivateStore", qos: .userInitiated)
     private let directoryUrl: URL
     private let fileUrl: URL
+    private var revision: Int64 = 0
+    private let revisionPromise = ValuePromise<Int64>(0, ignoreRepeated: true)
+
+    var updates: Signal<Void, NoError> {
+        return self.revisionPromise.get()
+        |> map { _ in () }
+    }
 
     public init(basePath: String) {
         let directoryUrl = URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent("double-bottom", isDirectory: true)
@@ -80,6 +87,8 @@ public final class DoubleBottomPrivateStore {
                 var state = try self.loadState()
                 f(&state)
                 try self.storeState(state)
+                self.revision += 1
+                self.revisionPromise.set(self.revision)
                 subscriber.putNext(())
                 subscriber.putCompletion()
             } catch let error as DoubleBottomPrivateStoreError {

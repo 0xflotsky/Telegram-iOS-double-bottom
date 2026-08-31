@@ -152,6 +152,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public let doubleBottomContext: DoubleBottomContext
     public let doubleBottomCredentialStore: DoubleBottomCredentialStore
     public let doubleBottomPrivateStore: DoubleBottomPrivateStore
+    public let doubleBottomPolicy: DoubleBottomPolicy
     private let doubleBottomSecureExitCoordinator: DoubleBottomSecureExitCoordinator
     public let appLockContext: AppLockContext
     public var notificationController: NotificationContainerController? {
@@ -319,10 +320,12 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         let doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
         let doubleBottomCredentialStore = DoubleBottomCredentialStore()
         let doubleBottomPrivateStore = DoubleBottomPrivateStore(basePath: basePath)
+        let doubleBottomPolicy = DoubleBottomPolicy(context: doubleBottomContext, privateStore: doubleBottomPrivateStore)
         self.doubleBottomContext = doubleBottomContext
         self.doubleBottomCredentialStore = doubleBottomCredentialStore
         self.doubleBottomPrivateStore = doubleBottomPrivateStore
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore)
+        self.doubleBottomPolicy = doubleBottomPolicy
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

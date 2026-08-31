@@ -322,9 +322,15 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.basePath = basePath
         self.networkArguments = networkArguments
         self.accountManager = accountManager
-        let doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
         let doubleBottomCredentialStore = DoubleBottomCredentialStore()
         let doubleBottomPrivateStore = DoubleBottomPrivateStore(basePath: basePath)
+        let initialDoubleBottomAccessState: DoubleBottomAccessState
+        if doubleBottomPrivateStore.requiresLocalUnlockOnLaunch || (!doubleBottomPrivateStore.hasPersistedState && doubleBottomCredentialStore.hasPersistedCredentials) {
+            initialDoubleBottomAccessState = .secureExited
+        } else {
+            initialDoubleBottomAccessState = .unlocked
+        }
+        let doubleBottomContext = DoubleBottomContext(accountManager: accountManager, initialAccessState: initialDoubleBottomAccessState)
         let doubleBottomPolicy = DoubleBottomPolicy(context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore)
         let doubleBottomProfileUIState = DoubleBottomProfileUIStateContextImpl(privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy)
         self.doubleBottomContext = doubleBottomContext
@@ -333,7 +339,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.doubleBottomPolicy = doubleBottomPolicy
         self.doubleBottomProfileUIState = doubleBottomProfileUIState
         self.doubleBottomProfileUIStateImpl = doubleBottomProfileUIState
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, presentationData: initialPresentationDataAndSettings.presentationData, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState)
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, presentationData: initialPresentationDataAndSettings.presentationData, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState, initialAccessState: initialDoubleBottomAccessState)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext

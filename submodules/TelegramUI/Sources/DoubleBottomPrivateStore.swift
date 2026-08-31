@@ -17,12 +17,13 @@ public struct DoubleBottomPrivateState: Codable, Equatable {
     public var decoyPinnedPeerIds: [Int64]
     public var decoyRecentPeerIds: [Int64]
     public var decoySortOrder: Int32
+    public var requiresLocalUnlock: Bool
 
     public static var empty: DoubleBottomPrivateState {
-        return DoubleBottomPrivateState(ownerPeerId: nil, decoyAllowedPeerIds: Set(), decoySelectedFolderId: nil, decoyFolders: [], decoyPinnedPeerIds: [], decoyRecentPeerIds: [], decoySortOrder: 0)
+        return DoubleBottomPrivateState(ownerPeerId: nil, decoyAllowedPeerIds: Set(), decoySelectedFolderId: nil, decoyFolders: [], decoyPinnedPeerIds: [], decoyRecentPeerIds: [], decoySortOrder: 0, requiresLocalUnlock: false)
     }
 
-    public init(ownerPeerId: Int64? = nil, decoyAllowedPeerIds: Set<Int64>, decoySelectedFolderId: String? = nil, decoyFolders: [LocalFolder] = [], decoyPinnedPeerIds: [Int64] = [], decoyRecentPeerIds: [Int64] = [], decoySortOrder: Int32 = 0) {
+    public init(ownerPeerId: Int64? = nil, decoyAllowedPeerIds: Set<Int64>, decoySelectedFolderId: String? = nil, decoyFolders: [LocalFolder] = [], decoyPinnedPeerIds: [Int64] = [], decoyRecentPeerIds: [Int64] = [], decoySortOrder: Int32 = 0, requiresLocalUnlock: Bool = false) {
         self.ownerPeerId = ownerPeerId
         self.decoyAllowedPeerIds = decoyAllowedPeerIds
         self.decoySelectedFolderId = decoySelectedFolderId
@@ -30,6 +31,7 @@ public struct DoubleBottomPrivateState: Codable, Equatable {
         self.decoyPinnedPeerIds = decoyPinnedPeerIds
         self.decoyRecentPeerIds = decoyRecentPeerIds
         self.decoySortOrder = decoySortOrder
+        self.requiresLocalUnlock = requiresLocalUnlock
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -40,6 +42,7 @@ public struct DoubleBottomPrivateState: Codable, Equatable {
         case decoyPinnedPeerIds = "p"
         case decoyRecentPeerIds = "r"
         case decoySortOrder = "s"
+        case requiresLocalUnlock = "l"
     }
 
     public init(from decoder: Decoder) throws {
@@ -51,6 +54,7 @@ public struct DoubleBottomPrivateState: Codable, Equatable {
         self.decoyPinnedPeerIds = try container.decodeIfPresent([Int64].self, forKey: .decoyPinnedPeerIds) ?? []
         self.decoyRecentPeerIds = try container.decodeIfPresent([Int64].self, forKey: .decoyRecentPeerIds) ?? []
         self.decoySortOrder = try container.decodeIfPresent(Int32.self, forKey: .decoySortOrder) ?? 0
+        self.requiresLocalUnlock = try container.decodeIfPresent(Bool.self, forKey: .requiresLocalUnlock) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -62,6 +66,7 @@ public struct DoubleBottomPrivateState: Codable, Equatable {
         try container.encode(self.decoyPinnedPeerIds, forKey: .decoyPinnedPeerIds)
         try container.encode(self.decoyRecentPeerIds, forKey: .decoyRecentPeerIds)
         try container.encode(self.decoySortOrder, forKey: .decoySortOrder)
+        try container.encode(self.requiresLocalUnlock, forKey: .requiresLocalUnlock)
     }
 }
 
@@ -98,6 +103,19 @@ public final class DoubleBottomPrivateStore {
 
     var hasPersistedState: Bool {
         return FileManager.default.fileExists(atPath: self.fileUrl.path)
+    }
+
+    var requiresLocalUnlockOnLaunch: Bool {
+        guard self.hasPersistedState else {
+            return false
+        }
+        var requiresLocalUnlock = true
+        self.queue.sync {
+            if let state = try? self.loadState() {
+                requiresLocalUnlock = state.requiresLocalUnlock
+            }
+        }
+        return requiresLocalUnlock
     }
 
     public init(basePath: String) {
@@ -139,6 +157,22 @@ public final class DoubleBottomPrivateStore {
             return EmptyDisposable
         }
         |> runOn(self.queue)
+    }
+
+    func setRequiresLocalUnlockSynchronously(_ value: Bool) -> Bool {
+        var succeeded = false
+        self.queue.sync {
+            do {
+                var state = try self.loadState()
+                state.requiresLocalUnlock = value
+                try self.storeState(state)
+                self.revision += 1
+                self.revisionPromise.set(self.revision)
+                succeeded = true
+            } catch {
+            }
+        }
+        return succeeded
     }
 
     public func claimOwner(peerId: Int64) -> Signal<Bool, DoubleBottomPrivateStoreError> {

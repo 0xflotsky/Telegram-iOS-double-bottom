@@ -17,8 +17,9 @@ final class DoubleBottomSecureExitCoordinator {
     private var accessStateDisposable: Disposable?
     private let verificationDisposable = MetaDisposable()
     private let applyProfileDisposable = MetaDisposable()
+    private let unlockPersistenceDisposable = MetaDisposable()
 
-    init(window: Window1?, presentationData: PresentationData, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy, profileUIState: DoubleBottomProfileUIStateContextImpl) {
+    init(window: Window1?, presentationData: PresentationData, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy, profileUIState: DoubleBottomProfileUIStateContextImpl, initialAccessState: DoubleBottomAccessState) {
         self.window = window
         self.presentationData = presentationData
         self.coveringView = AuthorizationPasswordEntryCoveringView(presentationData: presentationData)
@@ -27,7 +28,7 @@ final class DoubleBottomSecureExitCoordinator {
         self.privateStore = privateStore
         self.policy = policy
         self.profileUIState = profileUIState
-        if (privateStore.hasPersistedState || credentialStore.hasPersistedCredentials), let window {
+        if initialAccessState == .secureExited, let window {
             window.privacyCoveringView = self.coveringView
         }
         self.coveringView.submitPassword = { [weak self] password in
@@ -63,12 +64,19 @@ final class DoubleBottomSecureExitCoordinator {
         self.accessStateDisposable?.dispose()
         self.verificationDisposable.dispose()
         self.applyProfileDisposable.dispose()
+        self.unlockPersistenceDisposable.dispose()
     }
 
     func secureExit() {
         assert(Queue.mainQueue().isCurrent())
+        let didPersistSecureExit = self.privateStore.setRequiresLocalUnlockSynchronously(true)
+        self.context.secureExit()
+
+        if !didPersistSecureExit {
+            self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
+        }
+
         guard let window = self.window else {
-            self.context.secureExit()
             return
         }
 
@@ -86,7 +94,6 @@ final class DoubleBottomSecureExitCoordinator {
         self.applyProfileDisposable.set(nil)
         self.privateStore.clearDecryptedState()
         self.profileUIState.clearSensitiveState()
-        self.context.secureExit()
     }
 
     private func verify(password: String) {
@@ -138,10 +145,27 @@ final class DoubleBottomSecureExitCoordinator {
                 guard let self else {
                     return
                 }
-                if profile == .decoy {
-                    (self.window?.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
+                self.unlockPersistenceDisposable.set((self.privateStore.update { state in
+                    state.requiresLocalUnlock = false
                 }
-                self.context.completeLocalUnlock()
+                |> map { _ in true }
+                |> `catch` { _ -> Signal<Bool, NoError> in
+                    return .single(false)
+                }
+                |> deliverOnMainQueue).startStrict(next: { [weak self] success in
+                    guard let self else {
+                        return
+                    }
+                    guard success else {
+                        self.coveringView.displayUnavailable()
+                        self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
+                        return
+                    }
+                    if profile == .decoy {
+                        (self.window?.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
+                    }
+                    self.context.completeLocalUnlock()
+                }))
             }))
         }))
     }

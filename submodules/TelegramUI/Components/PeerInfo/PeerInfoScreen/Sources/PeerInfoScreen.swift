@@ -2143,7 +2143,11 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                 return data?.hasSecretValues ?? false
             }
                         
-            screenData = peerInfoScreenSettingsData(context: context, peerId: peerId, accountsAndPeers: self.accountsAndPeers.get(), activeSessionsContextAndCount: self.activeSessionsContextAndCount.get(), notificationExceptions: self.notificationExceptions.get(), privacySettings: self.privacySettings.get(), archivedStickerPacks: self.archivedPacks.get(), hasPassport: hasPassport, starsContext: starsContext, tonContext: tonContext)
+            let settingsData = peerInfoScreenSettingsData(context: context, peerId: peerId, accountsAndPeers: self.accountsAndPeers.get(), activeSessionsContextAndCount: self.activeSessionsContextAndCount.get(), notificationExceptions: self.notificationExceptions.get(), privacySettings: self.privacySettings.get(), archivedStickerPacks: self.archivedPacks.get(), hasPassport: hasPassport, starsContext: starsContext, tonContext: tonContext)
+            screenData = combineLatest(settingsData, context.sharedContext.doubleBottomPeerPolicy.updates)
+            |> map { data, _ in
+                return data
+            }
             
             
             self.headerNode.displayCopyContextMenu = { [weak self] node, copyPhone, copyUsername in

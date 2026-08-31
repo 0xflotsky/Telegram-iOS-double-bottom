@@ -24,24 +24,35 @@ private final class DoubleBottomSettingsControllerNode: ASDisplayNode {
 
 final class DoubleBottomSettingsController: ViewController, UITableViewDataSource, UITableViewDelegate {
     private enum Row: Equatable {
+        case status(String)
         case setup
         case changePrimaryPassword
         case changeDecoyPassword
         case allowlist
-        case localFolder
+        case localFolders
+        case pinnedAndRecentChats
         case showAllChats
-        case clearFolders
         case sortOrder
+        case clearDecoyLayout
         case secureExit
+    }
+
+    private struct Section: Equatable {
+        let title: String?
+        let footer: String?
+        let rows: [Row]
     }
 
     private let context: AccountContext
     private unowned let sharedContext: SharedAccountContextImpl
+    private let presentationData: PresentationData
     private var credentialStatus: DoubleBottomCredentialStoreStatus = .notConfigured
-    private var rows: [Row] = []
+    private var privateState: DoubleBottomPrivateState?
+    private var sections: [Section] = []
     private let actionDisposable = MetaDisposable()
     private let pickerDisposable = MetaDisposable()
     private var stateDisposable: Disposable?
+    private var privateStateDisposable: Disposable?
 
     private var controllerNode: DoubleBottomSettingsControllerNode {
         return self.displayNode as! DoubleBottomSettingsControllerNode
@@ -51,6 +62,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         self.context = context
         self.sharedContext = sharedContext
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        self.presentationData = presentationData
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationTheme: presentationData.theme, presentationStrings: presentationData.strings))
         self.title = "Double Bottom"
 
@@ -63,6 +75,19 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
             self?.reloadRows()
         })
+        self.privateStateDisposable = (sharedContext.doubleBottomPrivateStore.updates
+        |> mapToSignal { _ -> Signal<DoubleBottomPrivateState?, NoError> in
+            return sharedContext.doubleBottomPrivateStore.load()
+            |> map(Optional.init)
+            |> `catch` { _ in
+                return .single(nil)
+            }
+        }
+        |> deliverOnMainQueue).startStrict(next: { [weak self] state in
+            self?.privateState = state
+            self?.reloadRows()
+        })
+        self.rebuildSections()
     }
 
     required init(coder aDecoder: NSCoder) {
@@ -73,6 +98,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         self.actionDisposable.dispose()
         self.pickerDisposable.dispose()
         self.stateDisposable?.dispose()
+        self.privateStateDisposable?.dispose()
     }
 
     override func loadDisplayNode() {
@@ -80,6 +106,8 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         node.tableView.dataSource = self
         node.tableView.delegate = self
         node.tableView.keyboardDismissMode = .interactive
+        node.tableView.backgroundColor = self.presentationData.theme.list.blocksBackgroundColor
+        node.tableView.separatorColor = self.presentationData.theme.list.itemBlocksSeparatorColor
         self.displayNode = node
         self.displayNodeDidLoad()
         self.reloadRows()
@@ -94,76 +122,118 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
     }
 
     private func reloadRows() {
-        guard self.isNodeLoaded else {
-            return
+        self.rebuildSections()
+        if self.isNodeLoaded {
+            self.controllerNode.tableView.reloadData()
         }
+    }
+
+    private func rebuildSections() {
         switch self.credentialStatus {
         case .notConfigured:
-            self.rows = [.setup]
+            self.sections = [
+                Section(title: "DOUBLE BOTTOM", footer: nil, rows: [.status("Not Configured")]),
+                Section(
+                    title: "SETUP",
+                    footer: "Create separate local passwords for the Primary and Decoy profiles. These passwords never leave this iPhone.",
+                    rows: [.setup]
+                )
+            ]
         case .configured:
-            self.rows = [.changePrimaryPassword, .changeDecoyPassword, .allowlist, .localFolder, .showAllChats, .clearFolders, .sortOrder, .secureExit]
+            let decoyState = self.sharedContext.doubleBottomProfileUIState.currentDecoyState
+            var decoyRows: [Row] = [.allowlist, .localFolders, .pinnedAndRecentChats]
+            if decoyState.selectedFolderId != nil {
+                decoyRows.append(.showAllChats)
+            }
+            decoyRows.append(.sortOrder)
+            decoyRows.append(.clearDecoyLayout)
+            self.sections = [
+                Section(title: "DOUBLE BOTTOM", footer: nil, rows: [.status("Active")]),
+                Section(
+                    title: "PASSWORDS",
+                    footer: "Primary and Decoy passwords are stored locally on this iPhone and are never sent to Telegram.",
+                    rows: [.changePrimaryPassword, .changeDecoyPassword]
+                ),
+                Section(
+                    title: "DECOY PROFILE",
+                    footer: "Allowed chats, folders, pins, recent chats and sorting are local to the Decoy profile. Telegram cloud folders are not modified.",
+                    rows: decoyRows
+                ),
+                Section(title: "SECURITY", footer: "Secure Exit locks both local profiles without logging out of Telegram.", rows: [.secureExit])
+            ]
         case .unavailable:
-            self.rows = []
+            self.sections = [
+                Section(
+                    title: "DOUBLE BOTTOM",
+                    footer: "Local credential storage is unavailable. No profile data was changed.",
+                    rows: [.status("Unavailable")]
+                )
+            ]
         }
-        self.controllerNode.tableView.reloadData()
     }
 
     func numberOfSections(in tableView: UITableView) -> Int {
-        return self.credentialStatus == .unavailable ? 1 : 2
+        return self.sections.count
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        if section == 0 {
-            return self.rows.filter { $0 != .secureExit }.count
-        } else {
-            return self.rows.contains(.secureExit) ? 1 : 0
-        }
+        return self.sections[section].rows.count
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        if self.credentialStatus == .unavailable {
-            return "Double Bottom"
-        }
-        return section == 0 ? "Local Profiles" : nil
+        return self.sections[section].title
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        if self.credentialStatus == .unavailable {
-            return "Local credential storage is unavailable. No profile data was changed."
-        }
-        if section == 0 {
-            return "Both passwords are local to this iPhone and are never sent to Telegram. Decoy folders and sorting do not modify Telegram cloud folders."
-        }
-        return nil
+        return self.sections[section].footer
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
         let row = self.row(at: indexPath)
         cell.accessoryType = .disclosureIndicator
+        cell.backgroundColor = self.presentationData.theme.list.itemBlocksBackgroundColor
+        cell.textLabel?.textColor = self.presentationData.theme.list.itemPrimaryTextColor
+        cell.detailTextLabel?.textColor = self.presentationData.theme.list.itemSecondaryTextColor
+        cell.tintColor = self.presentationData.theme.list.itemAccentColor
         switch row {
+        case let .status(value):
+            cell.textLabel?.text = "Status"
+            cell.detailTextLabel?.text = value
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
         case .setup:
             cell.textLabel?.text = "Set Up Double Bottom"
+            cell.textLabel?.textColor = self.presentationData.theme.list.itemAccentColor
         case .changePrimaryPassword:
             cell.textLabel?.text = "Change Primary Password"
         case .changeDecoyPassword:
             cell.textLabel?.text = "Change Decoy Password"
         case .allowlist:
-            cell.textLabel?.text = "Decoy Chats"
-        case .localFolder:
-            cell.textLabel?.text = "Create Local Folder"
+            cell.textLabel?.text = "Allowed Chats"
+            if let count = self.privateState?.decoyAllowedPeerIds.count {
+                cell.detailTextLabel?.text = "\(count)"
+            }
+        case .localFolders:
+            cell.textLabel?.text = "Local Folders"
+            cell.detailTextLabel?.text = "\(self.sharedContext.doubleBottomProfileUIState.currentDecoyState.folders.count)"
+        case .pinnedAndRecentChats:
+            cell.textLabel?.text = "Pinned / Recent Chats"
+            let state = self.sharedContext.doubleBottomProfileUIState.currentDecoyState
+            cell.detailTextLabel?.text = "\(state.pinnedPeerIds.count) / \(state.recentPeerIds.count)"
         case .showAllChats:
-            cell.textLabel?.text = "Show All Decoy Chats"
-            cell.accessoryType = .none
-        case .clearFolders:
-            cell.textLabel?.text = "Clear Local Folders"
+            cell.textLabel?.text = "Show All Allowed Chats"
             cell.accessoryType = .none
         case .sortOrder:
-            cell.textLabel?.text = "Decoy Sort Order"
+            cell.textLabel?.text = "Chat Sort Order"
             cell.detailTextLabel?.text = self.sharedContext.doubleBottomProfileUIState.currentDecoyState.sortOrder == .title ? "Title" : "Activity"
+        case .clearDecoyLayout:
+            cell.textLabel?.text = "Clear Decoy Layout"
+            cell.textLabel?.textColor = self.presentationData.theme.list.itemDestructiveColor
+            cell.accessoryType = .none
         case .secureExit:
             cell.textLabel?.text = "Secure Exit"
-            cell.textLabel?.textColor = .systemRed
+            cell.textLabel?.textColor = self.presentationData.theme.list.itemDestructiveColor
             cell.accessoryType = .none
         }
         return cell
@@ -172,6 +242,8 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         switch self.row(at: indexPath) {
+        case .status:
+            break
         case .setup:
             self.presentCredentialSetup()
         case .changePrimaryPassword:
@@ -180,25 +252,72 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
             self.presentPasswordChange(profile: .decoy)
         case .allowlist:
             self.openAllowlistPicker()
-        case .localFolder:
+        case .localFolders:
             self.presentFolderName()
+        case .pinnedAndRecentChats:
+            self.presentPinnedAndRecentActions()
         case .showAllChats:
             let _ = self.sharedContext.doubleBottomProfileUIState.setSelectedFolderId(nil).startStandalone()
-        case .clearFolders:
-            let _ = self.sharedContext.doubleBottomProfileUIState.setFolders([]).startStandalone()
         case .sortOrder:
             let current = self.sharedContext.doubleBottomProfileUIState.currentDecoyState.sortOrder
             let _ = self.sharedContext.doubleBottomProfileUIState.setSortOrder(current == .activity ? .title : .activity).startStandalone()
+        case .clearDecoyLayout:
+            self.confirmClearDecoyLayout()
         case .secureExit:
             let _ = self.sharedContext.performDoubleBottomSecureExitIfOwner(accountPeerId: self.context.account.peerId)
         }
     }
 
     private func row(at indexPath: IndexPath) -> Row {
-        if indexPath.section == 1 {
-            return .secureExit
+        return self.sections[indexPath.section].rows[indexPath.row]
+    }
+
+    private func presentPinnedAndRecentActions() {
+        let state = self.sharedContext.doubleBottomProfileUIState.currentDecoyState
+        let alert = UIAlertController(
+            title: "Pinned / Recent Chats",
+            message: "Pinned: \(state.pinnedPeerIds.count)\nRecent: \(state.recentPeerIds.count)",
+            preferredStyle: .alert
+        )
+        if !state.pinnedPeerIds.isEmpty {
+            alert.addAction(UIAlertAction(title: "Clear Pinned Chats", style: .destructive, handler: { [weak self] _ in
+                guard let self else {
+                    return
+                }
+                let _ = self.sharedContext.doubleBottomProfileUIState.setPinnedPeerIds([]).startStandalone()
+            }))
         }
-        return self.rows.filter { $0 != .secureExit }[indexPath.row]
+        if !state.recentPeerIds.isEmpty {
+            alert.addAction(UIAlertAction(title: "Clear Recent Chats", style: .destructive, handler: { [weak self] _ in
+                guard let self else {
+                    return
+                }
+                let _ = self.sharedContext.doubleBottomProfileUIState.clearRecentPeerIds().startStandalone()
+            }))
+        }
+        alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+        self.present(alert, animated: true)
+    }
+
+    private func confirmClearDecoyLayout() {
+        let alert = UIAlertController(
+            title: "Clear Decoy Layout?",
+            message: "This clears local Decoy folders, pins, recent chats and custom sorting. Your Telegram chats and cloud folders are not changed.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive, handler: { [weak self] _ in
+            guard let self else {
+                return
+            }
+            let clear = self.sharedContext.doubleBottomProfileUIState.setFolders([])
+            |> then(self.sharedContext.doubleBottomProfileUIState.setSelectedFolderId(nil))
+            |> then(self.sharedContext.doubleBottomProfileUIState.setPinnedPeerIds([]))
+            |> then(self.sharedContext.doubleBottomProfileUIState.clearRecentPeerIds())
+            |> then(self.sharedContext.doubleBottomProfileUIState.setSortOrder(.activity))
+            let _ = clear.startStandalone()
+        }))
+        self.present(alert, animated: true)
     }
 
     private func presentCredentialSetup() {

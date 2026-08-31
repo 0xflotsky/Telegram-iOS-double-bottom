@@ -319,8 +319,8 @@ filegroup(
 filegroup(
     name = "BlackDefaultAppIcon",
     srcs = glob([
-        "Telegram-iOS/AppIcons.xcassets/BlackIcon.appiconset/**/*",
-    ], exclude = ["Telegram-iOS/AppIcons.xcassets/BlackIcon.appiconset/**/.*"]),
+        "Telegram-iOS/BlackTelegram.icon/**/*",
+    ], exclude = ["Telegram-iOS/BlackTelegram.icon/**/.*"]),
 )
 
 alternate_icon_folders = [

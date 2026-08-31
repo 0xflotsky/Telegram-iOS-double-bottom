@@ -207,7 +207,7 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
                 excludePeerIds: Set(),
                 pinnedPeerIds: [],
                 messageTagSummary: nil,
-                includeAdditionalPeerGroupIds: [],
+                includeAdditionalPeerGroupIds: [Namespaces.PeerGroup.archive],
                 include: { _, _, _, _, _ in false }
             )
         } else if let filter = location.filter, case let .filter(_, _, _, data) = filter {

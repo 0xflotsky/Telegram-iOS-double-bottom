@@ -213,7 +213,7 @@ enum CallListNodeEntry: Comparable, Identifiable {
     }
 }
 
-func callListNodeEntriesForView(view: EngineCallList, displayOpenNewCall: Bool, groupCalls: [EnginePeer], state: CallListNodeState, showSettings: Bool, showCallsTab: Bool, isRecentCalls: Bool, currentGroupCallPeerId: EnginePeer.Id?, accountPeerId: PeerId, doubleBottomPeerPolicy: DoubleBottomPeerPolicy) -> [CallListNodeEntry] {
+func callListNodeEntriesForView(view: EngineCallList, displayOpenNewCall: Bool, groupCalls: [EnginePeer], state: CallListNodeState, showSettings: Bool, showCallsTab: Bool, isRecentCalls: Bool, currentGroupCallPeerId: EnginePeer.Id?, accountPeerId: EnginePeer.Id, doubleBottomPeerPolicy: DoubleBottomPeerPolicy) -> [CallListNodeEntry] {
     var result: [CallListNodeEntry] = []
     for entry in view.items {
         switch entry {

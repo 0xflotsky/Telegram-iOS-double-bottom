@@ -2562,7 +2562,7 @@ public final class ChatListNode: ListViewImpl {
                         return nil
                     }
                 }
-                let originalIndices = Dictionary(uniqueKeysWithValues: normalizedIndexedPeerEntries.enumerated().compactMap { offset, item -> (PeerId, Int)? in
+                let originalIndices = Dictionary(uniqueKeysWithValues: normalizedIndexedPeerEntries.enumerated().compactMap { offset, item -> (EnginePeer.Id, Int)? in
                     guard case let .PeerEntry(peerEntry) = item.1 else {
                         return nil
                     }

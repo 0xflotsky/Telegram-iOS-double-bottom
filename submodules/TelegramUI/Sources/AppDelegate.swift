@@ -1304,10 +1304,22 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                     return .single(nil)
                 }
             }
+            |> mapToSignal { accountAndPhoneNumbers -> Signal<(UnauthorizedAccount, ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), AuthorizationSequencePurpose)?, NoError> in
+                guard let (account, phoneNumbers) = accountAndPhoneNumbers else {
+                    return .single(nil)
+                }
+                return sharedApplicationContext.sharedContext.authorizationPurpose(account: account, otherAccountPhoneNumbers: phoneNumbers)
+                |> map { purpose in
+                    guard let purpose else {
+                        return nil
+                    }
+                    return (account, phoneNumbers, purpose)
+                }
+            }
             |> deliverOnMainQueue
             |> map { accountAndSettings -> UnauthorizedApplicationContext? in
-                return accountAndSettings.flatMap { account, otherAccountPhoneNumbers in
-                    return UnauthorizedApplicationContext(apiId: buildConfig.apiId, apiHash: buildConfig.apiHash, sharedContext: sharedApplicationContext.sharedContext, account: account, otherAccountPhoneNumbers: otherAccountPhoneNumbers)
+                return accountAndSettings.flatMap { account, otherAccountPhoneNumbers, purpose in
+                    return UnauthorizedApplicationContext(apiId: buildConfig.apiId, apiHash: buildConfig.apiHash, sharedContext: sharedApplicationContext.sharedContext, account: account, otherAccountPhoneNumbers: otherAccountPhoneNumbers, purpose: purpose)
                 }
             }
         })
@@ -1431,6 +1443,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                 |> deliverOnMainQueue).start(next: { _ in
                     progressDisposable.dispose()
                     self.mainWindow.present(context.rootController, on: .root)
+                    Queue.mainQueue().justDispatch {
+                        context.sharedContext.doubleBottomAuthorizationDidPresent(accountId: context.account.id)
+                    }
                 }))
             } else {
                 authContextReadyDisposable.set(nil)

@@ -46,14 +46,14 @@ final class UnauthorizedApplicationContext {
 
     private var serviceNotificationEventsDisposable: Disposable?
     
-    init(apiId: Int32, apiHash: String, sharedContext: SharedAccountContextImpl, account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)])) {
+    init(apiId: Int32, apiHash: String, sharedContext: SharedAccountContextImpl, account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)]), purpose: AuthorizationSequencePurpose) {
         self.sharedContext = sharedContext
         self.account = account
         let presentationData = sharedContext.currentPresentationData.with { $0 }
         
         var authorizationCompleted: (() -> Void)?
         
-        self.rootController = AuthorizationSequenceController(sharedContext: sharedContext, account: account, otherAccountPhoneNumbers: otherAccountPhoneNumbers, presentationData: presentationData, openUrl: sharedContext.applicationBindings.openUrl, apiId: apiId, apiHash: apiHash, authorizationCompleted: {
+        self.rootController = AuthorizationSequenceController(sharedContext: sharedContext, account: account, otherAccountPhoneNumbers: otherAccountPhoneNumbers, presentationData: presentationData, openUrl: sharedContext.applicationBindings.openUrl, apiId: apiId, apiHash: apiHash, purpose: purpose, authorizationCompleted: {
             authorizationCompleted?()
         })
         (self.rootController as NavigationController).statusBarHost = sharedContext.mainWindow?.statusBarHost

@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import AsyncDisplayKit
+import AuthorizationUI
 import Postbox
 import TelegramCore
 import SwiftSignalKit
@@ -159,6 +160,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         return self.doubleBottomPolicy
     }
     private let doubleBottomSecureExitCoordinator: DoubleBottomSecureExitCoordinator
+    private var doubleBottomReentryAuthId: AccountRecordId?
     public let appLockContext: AppLockContext
     public var notificationController: NotificationContainerController? {
         didSet {
@@ -339,7 +341,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         self.doubleBottomPolicy = doubleBottomPolicy
         self.doubleBottomProfileUIState = doubleBottomProfileUIState
         self.doubleBottomProfileUIStateImpl = doubleBottomProfileUIState
-        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, presentationData: initialPresentationDataAndSettings.presentationData, context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState, initialAccessState: initialDoubleBottomAccessState)
+        self.doubleBottomSecureExitCoordinator = DoubleBottomSecureExitCoordinator(window: mainWindow, presentationData: initialPresentationDataAndSettings.presentationData, context: doubleBottomContext, privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy, profileUIState: doubleBottomProfileUIState, initialAccessState: initialDoubleBottomAccessState)
         self.navigateToChatImpl = navigateToChat
         self.displayUpgradeProgress = displayUpgradeProgress
         self.appLockContext = appLockContext
@@ -1114,6 +1116,10 @@ public final class SharedAccountContextImpl: SharedAccountContext {
                 }
             })
         }
+
+        self.doubleBottomSecureExitCoordinator.beginAuthorization = { [weak self] in
+            self?.beginDoubleBottomReentryAuthorization()
+        }
         
         /*if #available(iOS 13.0, *) {
             let userInterfaceStyle: UIUserInterfaceStyle
@@ -1788,6 +1794,188 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         let _ = self.accountManager.transaction({ transaction -> Void in
             let _ = transaction.createAuth([.environment(AccountEnvironmentAttribute(environment: testingEnvironment ? .test : .production))])
         }).start()
+    }
+
+    func authorizationPurpose(account: UnauthorizedAccount, otherAccountPhoneNumbers: ((String, AccountRecordId, Bool)?, [(String, AccountRecordId, Bool)])) -> Signal<AuthorizationSequencePurpose?, NoError> {
+        return (self.doubleBottomContext.accessState
+        |> take(1)
+        |> deliverOnMainQueue
+        |> mapToSignal { [weak self] accessState -> Signal<AuthorizationSequencePurpose?, NoError> in
+            guard let self else {
+                return .single(nil)
+            }
+            guard accessState == .secureExited else {
+                return .single(.normal)
+            }
+            return self.doubleBottomPrivateStore.load()
+            |> deliverOnMainQueue
+            |> map { [weak self] state -> AuthorizationSequencePurpose? in
+                guard let self, state.requiresLocalUnlock, let ownerPeerIdValue = state.ownerPeerId else {
+                    return nil
+                }
+                let protectedOwnerPeerId = PeerId(ownerPeerIdValue)
+                guard let ownerContext = self.activeAccountsValue?.accounts.first(where: { $0.1.account.peerId == protectedOwnerPeerId })?.1 else {
+                    return nil
+                }
+                guard let ownerPhoneNumber = otherAccountPhoneNumbers.1.first(where: { $0.1 == ownerContext.account.id })?.0 else {
+                    return nil
+                }
+                guard ownerContext.account.testingEnvironment == account.testingEnvironment else {
+                    return nil
+                }
+
+                self.doubleBottomReentryAuthId = account.id
+                return .doubleBottomReentry(AuthorizationSequenceDoubleBottomReentryContext(
+                    protectedOwnerPeerId: protectedOwnerPeerId,
+                    preservedOwnerAccountId: ownerContext.account.id,
+                    preservedOwnerPhoneNumber: ownerPhoneNumber,
+                    verifyPassword: { [weak self] password in
+                        guard let self else {
+                            return .single(.unavailable)
+                        }
+                        return self.verifyDoubleBottomReentryPassword(
+                            password,
+                            protectedOwnerPeerId: protectedOwnerPeerId,
+                            preservedOwnerAccountId: ownerContext.account.id,
+                            temporaryAuthId: account.id
+                        )
+                    }
+                ))
+            }
+            |> `catch` { _ -> Signal<AuthorizationSequencePurpose?, NoError> in
+                return .single(nil)
+            }
+        })
+    }
+
+    func doubleBottomAuthorizationDidPresent(accountId: AccountRecordId) {
+        assert(Queue.mainQueue().isCurrent())
+        guard self.doubleBottomReentryAuthId == accountId else {
+            return
+        }
+        self.doubleBottomSecureExitCoordinator.authorizationDidPresent()
+    }
+
+    private func beginDoubleBottomReentryAuthorization() {
+        assert(Queue.mainQueue().isCurrent())
+        guard let ownerContext = self.activeAccountsValue?.accounts.first(where: { self.doubleBottomPolicy.isOwner(accountPeerId: $0.1.account.peerId) })?.1 else {
+            return
+        }
+        let testingEnvironment = ownerContext.account.testingEnvironment
+        let _ = (self.accountManager.transaction { transaction -> AccountRecordId? in
+            if let currentAuth = transaction.getCurrentAuth() {
+                return currentAuth.id
+            }
+            return transaction.createAuth([.environment(AccountEnvironmentAttribute(environment: testingEnvironment ? .test : .production))])?.id
+        }
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] authId in
+            self?.doubleBottomReentryAuthId = authId
+        })
+    }
+
+    private func verifyDoubleBottomReentryPassword(_ password: String, protectedOwnerPeerId: PeerId, preservedOwnerAccountId: AccountRecordId, temporaryAuthId: AccountRecordId) -> Signal<AuthorizationSequenceDoubleBottomPasswordResult, NoError> {
+        return self.doubleBottomCredentialStore.verify(password: password)
+        |> mapToSignal { [weak self] result -> Signal<AuthorizationSequenceDoubleBottomPasswordResult, NoError> in
+            guard let self else {
+                return .single(.unavailable)
+            }
+
+            let profile: DoubleBottomProfile
+            let authorizationResult: AuthorizationSequenceDoubleBottomPasswordResult
+            switch result {
+            case .primary:
+                profile = .primary
+                authorizationResult = .primary
+            case .decoy:
+                profile = .decoy
+                authorizationResult = .decoy
+            case .invalid:
+                return .single(.invalid)
+            case .notConfigured, .unavailable:
+                return .single(.unavailable)
+            }
+
+            return Signal<Bool, NoError>.single(true)
+            |> deliverOnMainQueue
+            |> map { [weak self] _ -> Bool in
+                guard let self else {
+                    return false
+                }
+                return self.doubleBottomReentryAuthId == temporaryAuthId
+                    && self.activeAccountsValue?.accounts.first(where: { $0.0 == preservedOwnerAccountId })?.1.account.peerId == protectedOwnerPeerId
+                    && self.doubleBottomPolicy.isOwner(accountPeerId: protectedOwnerPeerId)
+            }
+            |> mapToSignal { [weak self] isValidOwner -> Signal<Bool, NoError> in
+                guard let self, isValidOwner else {
+                    return .single(false)
+                }
+                return self.doubleBottomContext.setCurrentProfile(profile)
+                |> mapToSignal { _ -> Signal<DoubleBottomProfile, NoError> in
+                    return self.doubleBottomContext.currentProfile
+                    |> filter { $0 == profile }
+                    |> take(1)
+                }
+                |> mapToSignal { _ -> Signal<Bool, NoError> in
+                    return self.doubleBottomPrivateStore.update { state in
+                        guard state.ownerPeerId == protectedOwnerPeerId.toInt64() else {
+                            return
+                        }
+                        state.requiresLocalUnlock = false
+                    }
+                    |> map { true }
+                    |> `catch` { _ -> Signal<Bool, NoError> in
+                        return .single(false)
+                    }
+                }
+            }
+            |> deliverOnMainQueue
+            |> mapToSignal { [weak self] didPersist -> Signal<Bool, NoError> in
+                guard let self, didPersist else {
+                    return .single(false)
+                }
+                guard self.doubleBottomReentryAuthId == temporaryAuthId,
+                      self.activeAccountsValue?.accounts.first(where: { $0.0 == preservedOwnerAccountId })?.1.account.peerId == protectedOwnerPeerId,
+                      self.doubleBottomPolicy.isOwner(accountPeerId: protectedOwnerPeerId) else {
+                    return .single(false)
+                }
+                self.doubleBottomContext.completeLocalUnlock()
+                return (self.doubleBottomPolicy.mode(accountPeerId: protectedOwnerPeerId)
+                |> filter { mode in
+                    switch (profile, mode) {
+                    case (.primary, .primary), (.decoy, .decoy):
+                        return true
+                    default:
+                        return false
+                    }
+                }
+                |> take(1)
+                |> mapToSignal { _ -> Signal<Bool, NoError> in
+                    return self.accountManager.transaction { transaction -> Bool in
+                        guard transaction.getCurrentAuth()?.id == temporaryAuthId,
+                              transaction.getRecords().contains(where: { $0.id == preservedOwnerAccountId }) else {
+                            return false
+                        }
+                        transaction.setCurrentId(preservedOwnerAccountId)
+                        transaction.removeAuth()
+                        return true
+                    }
+                })
+            }
+            |> deliverOnMainQueue
+            |> map { [weak self] success -> AuthorizationSequenceDoubleBottomPasswordResult in
+                guard let self else {
+                    return .unavailable
+                }
+                if success {
+                    self.doubleBottomReentryAuthId = nil
+                    return authorizationResult
+                } else {
+                    let _ = self.doubleBottomPrivateStore.setRequiresLocalUnlockSynchronously(true)
+                    self.doubleBottomContext.secureExit()
+                    return .unavailable
+                }
+            }
+        }
     }
     
     public func switchToAccount(id: AccountRecordId, fromSettingsController settingsController: ViewController? = nil, withChatListController chatListController: ViewController? = nil) {

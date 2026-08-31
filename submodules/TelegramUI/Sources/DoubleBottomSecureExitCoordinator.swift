@@ -1,41 +1,49 @@
-import AuthorizationUI
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
-import TelegramUIPreferences
 import UIKit
+
+private final class DoubleBottomAuthorizationPrivacyCover: WindowCoveringView {
+    init(presentationData: PresentationData) {
+        super.init(frame: .zero)
+        self.backgroundColor = presentationData.theme.list.plainBackgroundColor
+        self.isOpaque = true
+        self.accessibilityViewIsModal = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
 
 final class DoubleBottomSecureExitCoordinator {
     private weak var window: Window1?
-    private let coveringView: AuthorizationPasswordEntryCoveringView
-    private let presentationData: PresentationData
+    private let coveringView: DoubleBottomAuthorizationPrivacyCover
     private let context: DoubleBottomContext
-    private let credentialStore: DoubleBottomCredentialStore
     private let privateStore: DoubleBottomPrivateStore
     private let policy: DoubleBottomPolicy
     private let profileUIState: DoubleBottomProfileUIStateContextImpl
     private var accessStateDisposable: Disposable?
-    private let verificationDisposable = MetaDisposable()
-    private let applyProfileDisposable = MetaDisposable()
-    private let unlockPersistenceDisposable = MetaDisposable()
+    private var authorizationRequested = false
 
-    init(window: Window1?, presentationData: PresentationData, context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy, profileUIState: DoubleBottomProfileUIStateContextImpl, initialAccessState: DoubleBottomAccessState) {
+    var beginAuthorization: (() -> Void)? {
+        didSet {
+            self.requestAuthorizationIfNeeded()
+        }
+    }
+
+    init(window: Window1?, presentationData: PresentationData, context: DoubleBottomContext, privateStore: DoubleBottomPrivateStore, policy: DoubleBottomPolicy, profileUIState: DoubleBottomProfileUIStateContextImpl, initialAccessState: DoubleBottomAccessState) {
         self.window = window
-        self.presentationData = presentationData
-        self.coveringView = AuthorizationPasswordEntryCoveringView(presentationData: presentationData)
+        self.coveringView = DoubleBottomAuthorizationPrivacyCover(presentationData: presentationData)
         self.context = context
-        self.credentialStore = credentialStore
         self.privateStore = privateStore
         self.policy = policy
         self.profileUIState = profileUIState
-        if initialAccessState == .secureExited, let window {
-            window.privacyCoveringView = self.coveringView
-        }
-        self.coveringView.submitPassword = { [weak self] password in
-            self?.verify(password: password)
-        }
-        self.coveringView.forgotPassword = { [weak self] in
-            self?.presentPasswordAlert(text: presentationData.strings.TwoStepAuth_RecoveryUnavailable)
+        if initialAccessState == .secureExited {
+            self.authorizationRequested = true
+            if let window {
+                window.privacyCoveringView = self.coveringView
+            }
         }
         self.accessStateDisposable = policy.activeMode.startStrict(next: { [weak self] mode in
             guard let self, let window = self.window else {
@@ -43,11 +51,12 @@ final class DoubleBottomSecureExitCoordinator {
             }
 
             switch mode {
-            case .ordinary, .primary, .decoy:
+            case .ordinary:
+                break
+            case .primary, .decoy:
                 if window.privacyCoveringView === self.coveringView {
                     window.privacyCoveringView = nil
                 }
-                self.coveringView.reset()
             case .secureExited:
                 window.hostView.eventView.endEditing(true)
                 if window.privacyCoveringView !== self.coveringView {
@@ -56,25 +65,20 @@ final class DoubleBottomSecureExitCoordinator {
                 (window.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
                 self.privateStore.clearDecryptedState()
                 self.profileUIState.clearSensitiveState()
+                self.authorizationRequested = true
+                self.requestAuthorizationIfNeeded()
             }
         })
     }
 
     deinit {
         self.accessStateDisposable?.dispose()
-        self.verificationDisposable.dispose()
-        self.applyProfileDisposable.dispose()
-        self.unlockPersistenceDisposable.dispose()
     }
 
     func secureExit() {
         assert(Queue.mainQueue().isCurrent())
         let didPersistSecureExit = self.privateStore.setRequiresLocalUnlockSynchronously(true)
         self.context.secureExit()
-
-        if !didPersistSecureExit {
-            self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
-        }
 
         guard let window = self.window else {
             return
@@ -90,94 +94,28 @@ final class DoubleBottomSecureExitCoordinator {
             controller.view.endEditing(true)
             return true
         }
-        self.verificationDisposable.set(nil)
-        self.applyProfileDisposable.set(nil)
         self.privateStore.clearDecryptedState()
         self.profileUIState.clearSensitiveState()
+
+        if didPersistSecureExit {
+            self.authorizationRequested = true
+            self.requestAuthorizationIfNeeded()
+        }
     }
 
-    private func verify(password: String) {
-        self.coveringView.setInProgress(true)
-        guard self.policy.canUnlockActiveOwner else {
-            self.coveringView.displayUnavailable()
-            self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
+    func authorizationDidPresent() {
+        assert(Queue.mainQueue().isCurrent())
+        guard let window = self.window, window.privacyCoveringView === self.coveringView else {
             return
         }
-        self.verificationDisposable.set((self.credentialStore.verify(password: password)
-        |> deliverOnMainQueue).startStrict(next: { [weak self] result in
-            guard let self else {
-                return
-            }
-
-            let profile: DoubleBottomProfile
-            switch result {
-            case .primary:
-                profile = .primary
-            case .decoy:
-                profile = .decoy
-            case .invalid:
-                self.coveringView.displayInvalidPassword()
-                self.presentPasswordAlert(text: self.presentationData.strings.LoginPassword_InvalidPasswordError)
-                return
-            case .notConfigured, .unavailable:
-                self.coveringView.displayUnavailable()
-                self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
-                return
-            }
-
-            let applyProfile = (self.context.setCurrentProfile(profile)
-            |> ignoreValues)
-            |> then(
-                self.context.currentProfile
-                |> filter { $0 == profile }
-                |> take(1)
-                |> ignoreValues
-            )
-            |> then(
-                self.policy.currentProfile
-                |> filter { $0 == profile }
-                |> take(1)
-                |> ignoreValues
-            )
-            |> deliverOnMainQueue
-
-            self.applyProfileDisposable.set(applyProfile.startStrict(completed: { [weak self] in
-                guard let self else {
-                    return
-                }
-                self.unlockPersistenceDisposable.set((self.privateStore.update { state in
-                    state.requiresLocalUnlock = false
-                }
-                |> map { _ in true }
-                |> `catch` { _ -> Signal<Bool, NoError> in
-                    return .single(false)
-                }
-                |> deliverOnMainQueue).startStrict(next: { [weak self] success in
-                    guard let self else {
-                        return
-                    }
-                    guard success else {
-                        self.coveringView.displayUnavailable()
-                        self.presentPasswordAlert(text: self.presentationData.strings.Login_UnknownError)
-                        return
-                    }
-                    if profile == .decoy {
-                        (self.window?.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
-                    }
-                    self.context.completeLocalUnlock()
-                }))
-            }))
-        }))
+        window.privacyCoveringView = nil
     }
 
-    private func presentPasswordAlert(text: String) {
-        guard let window = self.window else {
+    private func requestAuthorizationIfNeeded() {
+        guard self.authorizationRequested, let beginAuthorization = self.beginAuthorization else {
             return
         }
-        let controller = UIAlertController(title: nil, message: text, preferredStyle: .alert)
-        controller.addAction(UIAlertAction(title: self.presentationData.strings.Common_OK, style: .default, handler: { [weak self] _ in
-            self?.coveringView.activateInput()
-        }))
-        window.presentNative(controller)
+        self.authorizationRequested = false
+        beginAuthorization()
     }
 }

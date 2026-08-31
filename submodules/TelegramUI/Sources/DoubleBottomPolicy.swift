@@ -1,14 +1,9 @@
+import AccountContext
 import Postbox
 import SwiftSignalKit
 import TelegramUIPreferences
 
-public enum DoubleBottomPolicyMode: Equatable {
-    case secureExited
-    case primary
-    case decoy
-}
-
-public final class DoubleBottomPolicy {
+public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
     private struct Snapshot: Equatable {
         let profile: DoubleBottomProfile
         let accessState: DoubleBottomAccessState
@@ -21,7 +16,21 @@ public final class DoubleBottomPolicy {
     private let snapshotPromise = ValuePromise<Snapshot>(ignoreRepeated: true)
     private var snapshotDisposable: Disposable?
 
-    public var mode: Signal<DoubleBottomPolicyMode, NoError> {
+    public var currentMode: DoubleBottomPeerPolicyMode {
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot, snapshot.accessState == .unlocked else {
+                return .secureExited
+            }
+            switch snapshot.profile {
+            case .primary:
+                return .primary
+            case .decoy:
+                return .decoy
+            }
+        }
+    }
+
+    public var mode: Signal<DoubleBottomPeerPolicyMode, NoError> {
         return self.snapshotPromise.get()
         |> map { snapshot in
             if snapshot.accessState == .secureExited {

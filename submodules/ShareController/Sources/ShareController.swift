@@ -297,6 +297,29 @@ public final class ShareControllerAppEnvironment: ShareControllerEnvironment {
     }
 }
 
+extension ShareControllerEnvironment {
+    var doubleBottomPeerPolicyUpdates: Signal<Void, NoError> {
+        guard let environment = self as? ShareControllerAppEnvironment else {
+            return .single(())
+        }
+        return environment.sharedContext.doubleBottomPeerPolicy.updates
+    }
+
+    func doubleBottomCanAccess(peerId: EnginePeer.Id) -> Bool {
+        guard let environment = self as? ShareControllerAppEnvironment else {
+            return true
+        }
+        return environment.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerId)
+    }
+
+    var doubleBottomIsPrimary: Bool {
+        guard let environment = self as? ShareControllerAppEnvironment else {
+            return true
+        }
+        return environment.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+    }
+}
+
 public final class ShareControllerSwitchableAccount: Equatable {
     public let account: ShareControllerAccountContext
     public let peer: EnginePeer
@@ -401,7 +424,7 @@ public final class ShareController: ViewController {
             switchableAccounts: switchableAccounts.map { info in
                 return ShareControllerSwitchableAccount(account: ShareControllerAppAccountContext(context: context.sharedContext.makeTempAccountContext(account: info.account)), peer: info.peer)
             },
-            immediatePeerId: immediatePeerId,
+            immediatePeerId: immediatePeerId.flatMap { context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0) ? $0 : nil },
             updatedPresentationData: updatedPresentationData,
             forceTheme: forceTheme,
             forcedActionTitle: forcedActionTitle,
@@ -418,7 +441,7 @@ public final class ShareController: ViewController {
         self.externalShare = externalShare
         self.immediateExternalShare = immediateExternalShare
         self.switchableAccounts = switchableAccounts
-        self.immediatePeerId = immediatePeerId
+        self.immediatePeerId = immediatePeerId.flatMap { environment.doubleBottomCanAccess(peerId: $0) ? $0 : nil }
         self.fromForeignApp = fromForeignApp
         self.segmentedValues = segmentedValues
         self.forceTheme = forceTheme
@@ -937,6 +960,9 @@ public final class ShareController: ViewController {
         
         self.controllerNode.share = { [weak self] text, peerIds, topicIds, showNames, silently in
             guard let self else {
+                return .complete()
+            }
+            guard peerIds.allSatisfy({ self.environment.doubleBottomCanAccess(peerId: $0) }) else {
                 return .complete()
             }
             

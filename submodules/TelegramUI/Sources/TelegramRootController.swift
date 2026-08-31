@@ -88,6 +88,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
     
     private var applicationInFocusDisposable: Disposable?
     private var storyUploadEventsDisposable: Disposable?
+    private var doubleBottomPolicyDisposable: Disposable?
     
     override public var minimizedContainer: MinimizedContainer? {
         didSet {
@@ -118,6 +119,13 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
                 }
             }
         })
+
+        self.doubleBottomPolicyDisposable = (context.sharedContext.doubleBottomPeerPolicy.mode
+        |> deliverOnMainQueue).startStrict(next: { [weak self] mode in
+            if mode != .primary {
+                self?.sanitizeForDoubleBottomPolicy()
+            }
+        })
         
         if context.sharedContext.applicationBindings.isMainApp {
             self.applicationInFocusDisposable = (context.sharedContext.applicationBindings.applicationIsActive
@@ -146,6 +154,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         self.presentationDataDisposable?.dispose()
         self.applicationInFocusDisposable?.dispose()
         self.storyUploadEventsDisposable?.dispose()
+        self.doubleBottomPolicyDisposable?.dispose()
     }
     
     public func getContactsController() -> ViewController? {
@@ -280,6 +289,13 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         if activateSearch {
             self.chatListController?.activateSearch(filter: filter, query: query)
         }
+    }
+
+    func sanitizeForDoubleBottomPolicy() {
+        self.presentedViewController?.dismiss(animated: false)
+        self.dismissMinimizedControllers(animated: false)
+        self.popToRoot(animated: false)
+        self.openChatsController(activateSearch: false)
     }
     
     public func openRootCompose() {

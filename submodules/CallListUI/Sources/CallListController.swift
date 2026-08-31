@@ -717,6 +717,9 @@ public final class CallListController: TelegramBaseController {
     }
     
     private func call(_ peerId: EnginePeer.Id, isVideo: Bool, began: (() -> Void)? = nil) {
+        guard self.context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerId) else {
+            return
+        }
         guard !self.presentAccountFrozenInfoIfNeeded() else {
             return
         }
@@ -745,6 +748,9 @@ public final class CallListController: TelegramBaseController {
     }
     
     private func openGroupCall(message: EngineMessage) {
+        guard self.context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: message.id.peerId) else {
+            return
+        }
         var action: TelegramMediaAction?
         for media in message.media {
             if let media = media as? TelegramMediaAction {

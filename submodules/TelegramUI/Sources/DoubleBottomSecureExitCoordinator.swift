@@ -219,6 +219,9 @@ final class DoubleBottomSecureExitCoordinator {
                 guard let self else {
                     return
                 }
+                if profile == .decoy {
+                    (self.window?.viewController as? TelegramRootController)?.sanitizeForDoubleBottomPolicy()
+                }
                 self.context.completeLocalUnlock()
             }))
         }))

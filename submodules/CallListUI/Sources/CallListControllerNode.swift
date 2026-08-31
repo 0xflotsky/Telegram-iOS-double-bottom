@@ -537,12 +537,13 @@ final class CallListControllerNode: ASDisplayNode {
             self.statePromise.get(),
             groupCalls,
             showCallsTab,
-            currentGroupCallPeerId
+            currentGroupCallPeerId,
+            context.sharedContext.doubleBottomPeerPolicy.updates
         )
-        |> mapToQueue { (updateAndType, state, groupCalls, showCallsTab, currentGroupCallPeerId) -> Signal<CallListNodeListViewTransition, NoError> in
+        |> mapToQueue { (updateAndType, state, groupCalls, showCallsTab, currentGroupCallPeerId, _) -> Signal<CallListNodeListViewTransition, NoError> in
             let (update, type) = updateAndType
             
-            let processedView = CallListNodeView(originalView: update.view, filteredEntries: callListNodeEntriesForView(view: update.view, displayOpenNewCall: type == .all, groupCalls: groupCalls, state: state, showSettings: showSettings, showCallsTab: showCallsTab, isRecentCalls: type == .all, currentGroupCallPeerId: currentGroupCallPeerId), presentationData: state.presentationData)
+            let processedView = CallListNodeView(originalView: update.view, filteredEntries: callListNodeEntriesForView(view: update.view, displayOpenNewCall: type == .all, groupCalls: groupCalls, state: state, showSettings: showSettings, showCallsTab: showCallsTab, isRecentCalls: type == .all, currentGroupCallPeerId: currentGroupCallPeerId, doubleBottomPeerPolicy: context.sharedContext.doubleBottomPeerPolicy), presentationData: state.presentationData)
             let previous = previousView.swap(processedView)
             let previousType = previousType.swap(type)
                         

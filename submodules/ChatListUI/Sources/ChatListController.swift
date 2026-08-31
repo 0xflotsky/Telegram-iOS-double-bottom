@@ -436,9 +436,9 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             }
         }
         
-        self.badgeDisposable = (combineLatest(renderedTotalUnreadCount(accountManager: context.sharedContext.accountManager, engine: context.engine), self.presentationDataValue.get()) |> deliverOnMainQueue).startStrict(next: { [weak self] count, presentationData in
+        self.badgeDisposable = (combineLatest(renderedTotalUnreadCount(accountManager: context.sharedContext.accountManager, engine: context.engine), self.presentationDataValue.get(), context.sharedContext.doubleBottomPeerPolicy.updates) |> deliverOnMainQueue).startStrict(next: { [weak self] count, presentationData, _ in
             if let strongSelf = self {
-                if count.0 == 0 {
+                if context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary || count.0 == 0 {
                     strongSelf.tabBarItem.badgeValue = ""
                 } else {
                     strongSelf.tabBarItem.badgeValue = compactNumericCountString(Int(count.0), decimalSeparator: presentationData.dateTimeFormat.decimalSeparator)
@@ -3996,9 +3996,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         self.filterDisposable.set((combineLatest(queue: .mainQueue(),
             filterItems,
             self.context.account.postbox.peerView(id: self.context.account.peerId),
-            self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false))
+            self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false)),
+            self.context.sharedContext.doubleBottomPeerPolicy.updates
         )
-        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits in
+        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits, _ in
             guard let strongSelf = self else {
                 return
             }
@@ -4006,7 +4007,16 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             let isPremium = peerView.peers[peerView.peerId]?.isPremium
             strongSelf.isPremium = isPremium ?? false
             
-            let (_, items) = countAndFilterItems
+            var (_, items) = countAndFilterItems
+            if strongSelf.context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
+                items = items.filter { item in
+                    if case .allChats = item.0 {
+                        return true
+                    } else {
+                        return false
+                    }
+                }
+            }
             var filterItems: [ChatListFilterTabEntry] = []
             
             for (filter, unreadCount, hasUnmutedUnread) in items {
@@ -4028,7 +4038,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 resolvedItems = []
             }
             
-            let firstItem = countAndFilterItems.1.first?.0 ?? .allChats
+            let firstItem = items.first?.0 ?? .allChats
             let firstItemEntryId: ChatListFilterTabEntryId
             switch firstItem {
                 case .allChats:

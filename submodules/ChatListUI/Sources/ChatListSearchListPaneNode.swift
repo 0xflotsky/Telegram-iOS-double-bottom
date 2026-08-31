@@ -469,6 +469,34 @@ public enum ChatListSearchEntry: Comparable, Identifiable {
     case emptyMessagesFooter(ChatListPresentationData, TelegramSearchPeersScope, String?)
     case addContact(String, PresentationTheme, PresentationStrings)
 
+    fileprivate var doubleBottomPeerId: EnginePeer.Id? {
+        switch self {
+        case let .topic(peer, _, _, _, _, _):
+            return peer.id
+        case let .recentlySearchedPeer(peer, _, _, _, _, _, _, _, _, _):
+            return peer.id
+        case let .adPeer(peer, _, _, _, _, _, _, _):
+            return peer.peer.id
+        case let .localPeer(peer, _, _, _, _, _, _, _, _, _, _, _):
+            return peer.id
+        case let .globalPeer(peer, _, _, _, _, _, _, _, _, _, _):
+            return peer.peer.id
+        case let .message(message, _, _, _, _, _, _, _, _, _, _, _, _, _, _):
+            return message.id.peerId
+        case .messagePlaceholder, .emptyMessagesFooter, .addContact:
+            return nil
+        }
+    }
+
+    fileprivate func withDoubleBottomMessageTotalCount(_ totalCount: Int32) -> ChatListSearchEntry {
+        switch self {
+        case let .message(message, peer, combinedPeerReadState, threadInfo, presentationData, _, selected, displayCustomHeader, key, resourceId, section, allPaused, storyStats, requiresPremiumForMessaging, searchScope):
+            return .message(message, peer, combinedPeerReadState, threadInfo, presentationData, totalCount, selected, displayCustomHeader, key, resourceId, section, allPaused, storyStats, requiresPremiumForMessaging, searchScope)
+        default:
+            return self
+        }
+    }
+
     public var stableId: ChatListSearchEntryStableId {
         switch self {
         case let .topic(_, threadInfo, _, _, _, _):
@@ -3829,7 +3857,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
         })
 
 
-        self.searchDisposable.set((foundItems |> mapToSignal { items -> Signal<([ChatListSearchEntry], Bool, String?)?, NoError> in
+        self.searchDisposable.set((combineLatest(foundItems, context.sharedContext.doubleBottomPeerPolicy.updates) |> mapToSignal { items, _ -> Signal<([ChatListSearchEntry], Bool, String?)?, NoError> in
             guard let (items, isSearching, query) = items else {
                 return .single(nil)
             }
@@ -3895,6 +3923,26 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                     default:
                         break
                     }
+                }
+
+                mappedItems = mappedItems.filter { item in
+                    if let peerId = item.doubleBottomPeerId {
+                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerId)
+                    } else if case .addContact = item {
+                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                    } else if case .messagePlaceholder = item {
+                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                    } else {
+                        return true
+                    }
+                }
+                if context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
+                    let visibleMessageCount = Int32(clamping: mappedItems.reduce(into: 0) { count, item in
+                        if case .message = item {
+                            count += 1
+                        }
+                    })
+                    mappedItems = mappedItems.map { $0.withDoubleBottomMessageTotalCount(visibleMessageCount) }
                 }
                 return (mappedItems, isSearching, query)
             }
@@ -4534,10 +4582,26 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
 
         self.recentDisposable.set((combineLatest(queue: .mainQueue(),
             presentationDataPromise.get(),
-            recentItems
+            recentItems,
+            context.sharedContext.doubleBottomPeerPolicy.updates
         )
-        |> deliverOnMainQueue).startStrict(next: { [weak self] presentationData, recentItems in
+        |> deliverOnMainQueue).startStrict(next: { [weak self] presentationData, recentItems, _ in
             if let strongSelf = self {
+                var recentItems = recentItems
+                recentItems.entries = recentItems.entries.compactMap { entry in
+                    switch entry {
+                    case let .topPeers(peers, theme, strings):
+                        let peers = peers.filter { context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0.id) }
+                        return peers.isEmpty ? nil : .topPeers(peers, theme, strings)
+                    case let .peer(_, peer, _, _, _, _, _, _, _, _, _):
+                        return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.peer.peerId) ? entry : nil
+                    case .footer:
+                        return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary ? entry : nil
+                    }
+                }
+                recentItems.recommendedChannelOrder = recentItems.recommendedChannelOrder.filter {
+                    context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: $0)
+                }
                 let previousRecentItems = previousRecentItemsValue.swap(recentItems)
 
                 var firstTime = previousRecentItems == nil

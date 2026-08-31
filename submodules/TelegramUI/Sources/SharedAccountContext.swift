@@ -153,6 +153,9 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public let doubleBottomCredentialStore: DoubleBottomCredentialStore
     public let doubleBottomPrivateStore: DoubleBottomPrivateStore
     public let doubleBottomPolicy: DoubleBottomPolicy
+    public var doubleBottomPeerPolicy: DoubleBottomPeerPolicy {
+        return self.doubleBottomPolicy
+    }
     private let doubleBottomSecureExitCoordinator: DoubleBottomSecureExitCoordinator
     public let appLockContext: AppLockContext
     public var notificationController: NotificationContainerController? {
@@ -1822,6 +1825,9 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToChat(accountId: AccountRecordId, peerId: PeerId, messageId: MessageId?) {
+        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+            return
+        }
         self.navigateToChatImpl(accountId, peerId, messageId, true)
     }
     
@@ -1855,6 +1861,9 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func openChatMessage(_ params: OpenChatMessageParams) -> Bool {
+        guard self.doubleBottomPolicy.canAccess(peerId: params.message.id.peerId) else {
+            return false
+        }
         return openChatMessageImpl(params)
     }
     
@@ -1955,6 +1964,9 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func makePeerInfoController(context: AccountContext, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?, peer: EnginePeer, mode: PeerInfoControllerMode, avatarInitiallyExpanded: Bool, fromChat: Bool, requestsContext: PeerInvitationImportersContext?) -> ViewController? {
+        guard self.doubleBottomPolicy.canAccess(peerId: peer.id) else {
+            return nil
+        }
         let controller = peerInfoControllerImpl(context: context, updatedPresentationData: updatedPresentationData, peer: peer, mode: mode, avatarInitiallyExpanded: avatarInitiallyExpanded, isOpenedFromChat: fromChat)
         controller?.navigationPresentation = .modalInLargeLayout
         return controller
@@ -2186,18 +2198,33 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func navigateToChatController(_ params: NavigateToChatControllerParams) {
+        guard self.doubleBottomPolicy.canAccess(peerId: params.chatLocation.peerId) else {
+            params.navigationController.popToRoot(animated: false)
+            return
+        }
         navigateToChatControllerImpl(params)
     }
     
     public func navigateToForumChannel(context: AccountContext, peerId: EnginePeer.Id, navigationController: NavigationController) {
+        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+            navigationController.popToRoot(animated: false)
+            return
+        }
         navigateToForumChannelImpl(context: context, peerId: peerId, navigationController: navigationController)
     }
     
     public func navigateToForumThread(context: AccountContext, peerId: EnginePeer.Id, threadId: Int64, messageId: EngineMessage.Id?, navigationController: NavigationController, activateInput: ChatControllerActivateInput?, scrollToEndIfExists: Bool, keepStack: NavigateToChatKeepStack, animated: Bool) -> Signal<Never, NoError> {
+        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+            navigationController.popToRoot(animated: false)
+            return .complete()
+        }
         return navigateToForumThreadImpl(context: context, peerId: peerId, threadId: threadId, messageId: messageId, navigationController: navigationController, activateInput: activateInput, scrollToEndIfExists: scrollToEndIfExists, keepStack: keepStack, animated: animated)
     }
     
     public func chatControllerForForumThread(context: AccountContext, peerId: EnginePeer.Id, threadId: Int64) -> Signal<ChatController, NoError> {
+        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+            return .complete()
+        }
         return chatControllerForForumThreadImpl(context: context, peerId: peerId, threadId: threadId)
     }
     
@@ -2262,7 +2289,49 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func openResolvedUrl(_ resolvedUrl: ResolvedUrl, context: AccountContext, urlContext: OpenURLContext, navigationController: NavigationController?, forceExternal: Bool, forceUpdate: Bool, openPeer: @escaping (EnginePeer, ChatControllerInteractionNavigateToPeer) -> Void, sendFile: ((FileMediaReference) -> Void)?, sendSticker: ((FileMediaReference, UIView?, CGRect?) -> Bool)?, sendEmoji: ((String, ChatTextInputTextCustomEmojiAttribute) -> Void)?, requestMessageActionUrlAuth: ((MessageActionUrlSubject) -> Void)?, joinVoiceChat: ((PeerId, String?, CachedChannelData.ActiveCall) -> Void)?, present: @escaping (ViewController, Any?) -> Void, dismissInput: @escaping () -> Void, contentContext: Any?, progress: Promise<Bool>?, completion: (() -> Void)?) {
-        openResolvedUrlImpl(resolvedUrl, context: context, urlContext: urlContext, navigationController: navigationController, forceExternal: forceExternal, forceUpdate: forceUpdate, openPeer: openPeer, sendFile: sendFile, sendSticker: sendSticker, sendEmoji: sendEmoji, requestMessageActionUrlAuth: requestMessageActionUrlAuth, joinVoiceChat: joinVoiceChat, present: present, dismissInput: dismissInput, contentContext: contentContext, progress: progress, completion: completion)
+        let directPeerId: PeerId?
+        switch resolvedUrl {
+        case let .peer(peer, _):
+            directPeerId = peer?.id
+        case let .botStart(peer, _):
+            directPeerId = peer.id
+        case let .groupBotStart(peerId, _, _, _), let .gameStart(peerId, _), let .joinVoiceChat(peerId, _), let .startAttach(peerId, _, _), let .story(peerId, _), let .storyFolder(peerId, _), let .giftCollection(peerId, _), let .createBot(peerId, _, _):
+            directPeerId = peerId
+        case let .channelMessage(peer, _, _):
+            directPeerId = peer.id
+        case let .replyThreadMessage(replyThreadMessage, _):
+            directPeerId = replyThreadMessage.peerId
+        case let .replyThread(messageId):
+            directPeerId = messageId.peerId
+        case let .boost(peerId, _, _), let .sendGift(peerId):
+            directPeerId = peerId
+        case let .messageLink(link):
+            directPeerId = link?.peer.id
+        default:
+            directPeerId = nil
+        }
+        if let directPeerId, !self.doubleBottomPolicy.canAccess(peerId: directPeerId) {
+            navigationController?.popToRoot(animated: false)
+            completion?()
+            return
+        }
+
+        let gatedOpenPeer: (EnginePeer, ChatControllerInteractionNavigateToPeer) -> Void = { [weak self] peer, navigation in
+            guard self?.doubleBottomPolicy.canAccess(peerId: peer.id) == true else {
+                navigationController?.popToRoot(animated: false)
+                return
+            }
+            openPeer(peer, navigation)
+        }
+        let gatedJoinVoiceChat: ((PeerId, String?, CachedChannelData.ActiveCall) -> Void)? = joinVoiceChat.map { joinVoiceChat in
+            return { [weak self] peerId, invite, call in
+                guard self?.doubleBottomPolicy.canAccess(peerId: peerId) == true else {
+                    return
+                }
+                joinVoiceChat(peerId, invite, call)
+            }
+        }
+        openResolvedUrlImpl(resolvedUrl, context: context, urlContext: urlContext, navigationController: navigationController, forceExternal: forceExternal, forceUpdate: forceUpdate, openPeer: gatedOpenPeer, sendFile: sendFile, sendSticker: sendSticker, sendEmoji: sendEmoji, requestMessageActionUrlAuth: requestMessageActionUrlAuth, joinVoiceChat: gatedJoinVoiceChat, present: present, dismissInput: dismissInput, contentContext: contentContext, progress: progress, completion: completion)
     }
 
     public func openUserGeneratedUrl(context: AccountContext, peerId: PeerId?, url: String, webpage: TelegramMediaWebpage?, concealed: Bool, forceConcealed: Bool, skipUrlAuth: Bool, skipConcealedAlert: Bool, forceDark: Bool, present: @escaping (ViewController) -> Void, openResolved: @escaping (ResolvedUrl) -> Void, progress: Promise<Bool>?, alertDisplayUpdated: ((ViewController?) -> Void)?, concealedAlertOption: OpenUserGeneratedUrlConcealedAlertOption?) -> Disposable {
@@ -2315,6 +2384,9 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func makePeerSharedMediaController(context: AccountContext, peerId: PeerId) -> ViewController? {
+        guard self.doubleBottomPolicy.canAccess(peerId: peerId) else {
+            return nil
+        }
         return nil
     }
     

@@ -429,9 +429,9 @@ public final class ContactsSearchContainerNode: SearchDisplayControllerContentNo
                     peerRequiresPremiumForMessaging = .single([:])
                 }
                 
-                return combineLatest(foundPeers.get(), peerRequiresPremiumForMessaging, foundDeviceContacts, themeAndStringsPromise.get())
+                return combineLatest(foundPeers.get(), peerRequiresPremiumForMessaging, foundDeviceContacts, themeAndStringsPromise.get(), context.sharedContext.doubleBottomPeerPolicy.updates)
                 |> delay(0.1, queue: Queue.concurrentDefaultQueue())
-                |> map { foundPeers, peerRequiresPremiumForMessaging, deviceContacts, themeAndStrings -> ([ContactListSearchEntry], String) in
+                |> map { foundPeers, peerRequiresPremiumForMessaging, deviceContacts, themeAndStrings, _ -> ([ContactListSearchEntry], String) in
                     let localPeersAndPresences = foundPeers.foundLocalContacts
                     let remotePeers = foundPeers.foundRemoteContacts
                     
@@ -594,6 +594,20 @@ public final class ContactsSearchContainerNode: SearchDisplayControllerContentNo
                     
                     if let _ = addContact, isViablePhoneNumber(query) {
                         entries.append(.addContact(theme: themeAndStrings.0, strings: themeAndStrings.1, phoneNumber: query))
+                    }
+
+                    entries = entries.filter { entry in
+                        switch entry {
+                        case .addContact:
+                            return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                        case let .peer(_, _, _, peer, _, _, _, _, _):
+                            switch peer {
+                            case let .peer(peer, _, _):
+                                return context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.id)
+                            case .deviceContact:
+                                return context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary
+                            }
+                        }
                     }
                     
                     return (entries, query)

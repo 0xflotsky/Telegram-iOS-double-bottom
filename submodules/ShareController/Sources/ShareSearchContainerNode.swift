@@ -283,8 +283,8 @@ final class ShareSearchContainerNode: ASDisplayNode, ShareContentContainerNode {
         
         self.cancelButtonNode.addTarget(self, action: #selector(self.cancelPressed), forControlEvents: .touchUpInside)
         
-        let foundItems = combineLatest(self.searchQuery.get(), self.themePromise.get())
-        |> mapToSignal { query, theme -> Signal<([ShareSearchPeerEntry]?, Bool), NoError> in
+        let foundItems = combineLatest(self.searchQuery.get(), self.themePromise.get(), environment.doubleBottomPeerPolicyUpdates)
+        |> mapToSignal { query, theme, _ -> Signal<([ShareSearchPeerEntry]?, Bool), NoError> in
             if !query.isEmpty {
                 let accountPeer = context.engineData.get(TelegramEngine.EngineData.Item.Peer.Peer(id: context.accountPeerId))
                 |> mapToSignal { peer -> Signal<EnginePeer, NoError> in
@@ -416,6 +416,12 @@ final class ShareSearchContainerNode: ASDisplayNode, ShareContentContainerNode {
                         }
                     }
                     
+                    entries = entries.filter { entry in
+                        guard let peerId = entry.peer?.peerId else {
+                            return isPlaceholder
+                        }
+                        return environment.doubleBottomCanAccess(peerId: peerId)
+                    }
                     return (entries, isPlaceholder)
                 }
             } else {
@@ -466,15 +472,15 @@ final class ShareSearchContainerNode: ASDisplayNode, ShareContentContainerNode {
         }
         |> distinctUntilChanged
         
-        let recentItems: Signal<[ShareSearchRecentEntry], NoError> = combineLatest(hasRecentPeers, self.themePromise.get())
-        |> map { hasRecentPeers, theme -> [ShareSearchRecentEntry] in
+        let recentItems: Signal<[ShareSearchRecentEntry], NoError> = combineLatest(hasRecentPeers, self.themePromise.get(), environment.doubleBottomPeerPolicyUpdates)
+        |> map { hasRecentPeers, theme, _ -> [ShareSearchRecentEntry] in
             var recentItemList: [ShareSearchRecentEntry] = []
-            if hasRecentPeers {
+            if hasRecentPeers && environment.doubleBottomIsPrimary {
                 recentItemList.append(.topPeers(theme, strings))
             }
             var index = 0
             for (peer, requiresPremiumForMessaging) in recentPeerList {
-                if let mainPeer = peer.peers[peer.peerId], canSendMessagesToPeer(mainPeer) {
+                if let mainPeer = peer.peers[peer.peerId], canSendMessagesToPeer(mainPeer), environment.doubleBottomCanAccess(peerId: mainPeer.id) {
                     recentItemList.append(.peer(index: index, theme: theme, peer: mainPeer, associatedPeer: mainPeer.associatedPeerId.flatMap { peer.peers[$0] }, presence: nil, requiresPremiumForMessaging: requiresPremiumForMessaging, requiresStars: nil, strings: strings))
                     index += 1
                 }

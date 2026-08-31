@@ -2155,10 +2155,11 @@ public final class ChatListNode: ListViewImpl {
                 context.engine.peers.updatedChatListFilters(),
                 context.engine.data.subscribe(
                     TelegramEngine.EngineData.Item.ChatList.FiltersDisplayTags()
-                )
+                ),
+                context.sharedContext.doubleBottomPeerPolicy.updates
             )
-            |> map { filters, displayTags -> [ChatListFilter]? in
-                if !displayTags {
+            |> map { filters, displayTags, _ -> [ChatListFilter]? in
+                if !displayTags || context.sharedContext.doubleBottomPeerPolicy.currentMode != .primary {
                     return nil
                 }
                 return filters.filter { filter in
@@ -2190,9 +2191,10 @@ public final class ChatListNode: ListViewImpl {
             self.statePromise.get(),
             contacts,
             chatListFilters,
-            accountIsPremium
+            accountIsPremium,
+            context.sharedContext.doubleBottomPeerPolicy.updates
         )
-        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium) -> Signal<ChatListNodeListViewTransition, NoError> in
+        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, _) -> Signal<ChatListNodeListViewTransition, NoError> in
             let (update, filter) = updateAndFilter
             
             let previousHideArchivedFolderByDefaultValue = previousHideArchivedFolderByDefault.swap(hideArchivedFolderByDefault)
@@ -2202,6 +2204,27 @@ public final class ChatListNode: ListViewImpl {
             let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
             var isEmpty = true
             var entries = rawEntries.filter { entry in
+                switch entry {
+                case let .PeerEntry(peerEntry):
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peerEntry.peer.peerId) else {
+                        return false
+                    }
+                case let .ContactEntry(contactEntry):
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: contactEntry.peer.id) else {
+                        return false
+                    }
+                case .GroupReferenceEntry:
+                    guard context.sharedContext.doubleBottomPeerPolicy.currentMode == .primary else {
+                        return false
+                    }
+                case let .TopPeer(_, peer):
+                    guard context.sharedContext.doubleBottomPeerPolicy.canAccess(peerId: peer.id) else {
+                        return false
+                    }
+                default:
+                    break
+                }
+
                 switch entry {
                 case let .PeerEntry(peerEntry):
                     let peer = peerEntry.peer

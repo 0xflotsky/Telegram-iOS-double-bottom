@@ -443,9 +443,23 @@ private func contactListNodeEntries(
     storySubscriptions: EngineStorySubscriptions?,
     topPeers: [EnginePeer],
     topPeersPresentation: ContactListPresentation.TopPeers,
+    doubleBottomPeerPolicy: DoubleBottomPeerPolicy,
     isPeerEnabled: ((EnginePeer) -> Bool)?,
     interaction: ContactListNodeInteraction
 ) -> [ContactListNodeEntry] {
+    let accountPeer = accountPeer.flatMap { peer in
+        return doubleBottomPeerPolicy.canAccess(peerId: peer.id) ? peer : nil
+    }
+    let peers = peers.filter { peer in
+        switch peer {
+        case let .peer(peer, _, _):
+            return doubleBottomPeerPolicy.canAccess(peerId: peer.id)
+        case .deviceContact:
+            return doubleBottomPeerPolicy.currentMode == .primary
+        }
+    }
+    let topPeers = topPeers.filter { doubleBottomPeerPolicy.canAccess(peerId: $0.id) }
+
     var entries: [ContactListNodeEntry] = []
     
     var commonHeader: ListViewItemHeader?
@@ -1590,7 +1604,7 @@ public final class ContactListNode: ASDisplayNode {
                         peerRequiresPremiumForMessaging = .single([:])
                     }
                     
-                    return combineLatest(accountPeer, foundPeers.get(), peerRequiresPremiumForMessaging, foundDeviceContacts, selectionStateSignal, pendingRemovalPeerIdsSignal, presentationDataPromise.get())
+                    return combineLatest(accountPeer, foundPeers.get(), peerRequiresPremiumForMessaging, foundDeviceContacts, selectionStateSignal, pendingRemovalPeerIdsSignal, presentationDataPromise.get(), context.sharedContext.doubleBottomPeerPolicy.updates)
                     |> mapToQueue {
                         accountPeer,
                         foundPeers,
@@ -1598,7 +1612,8 @@ public final class ContactListNode: ASDisplayNode {
                         deviceContacts,
                         selectionState,
                         pendingRemovalPeerIds,
-                        presentationData -> Signal<ContactsListNodeTransition, NoError> in
+                        presentationData,
+                        _ -> Signal<ContactsListNodeTransition, NoError> in
                         let localPeersAndStatuses = foundPeers.foundLocalContacts
                         let remotePeers = foundPeers.foundRemoteContacts
                         
@@ -1774,6 +1789,7 @@ public final class ContactListNode: ASDisplayNode {
                                 storySubscriptions: nil,
                                 topPeers: [],
                                 topPeersPresentation: .none,
+                                doubleBottomPeerPolicy: context.sharedContext.doubleBottomPeerPolicy,
                                 isPeerEnabled: isPeerEnabled,
                                 interaction: interaction
                             )
@@ -1922,7 +1938,8 @@ public final class ContactListNode: ASDisplayNode {
                         contactsAuthorization.get(),
                         contactsWarningSuppressed.get(),
                         self.storySubscriptions.get(),
-                        topPeers
+                        topPeers,
+                        context.sharedContext.doubleBottomPeerPolicy.updates
                     )
                     |> mapToQueue {
                         view,
@@ -1933,7 +1950,8 @@ public final class ContactListNode: ASDisplayNode {
                         authorizationStatus,
                         warningSuppressed,
                         storySubscriptions,
-                        topPeers -> Signal<ContactsListNodeTransition, NoError> in
+                        topPeers,
+                        _ -> Signal<ContactsListNodeTransition, NoError> in
                         let signal = deferred { () -> Signal<ContactsListNodeTransition, NoError> in
                             if !view.2.isEmpty {
                                 context.account.viewTracker.refreshCanSendMessagesForPeerIds(peerIds: Array(view.2.keys))
@@ -2012,6 +2030,7 @@ public final class ContactListNode: ASDisplayNode {
                                 topPeers: topPeers.map { $0.peer
                                 },
                                 topPeersPresentation: displayTopPeers,
+                                doubleBottomPeerPolicy: context.sharedContext.doubleBottomPeerPolicy,
                                 isPeerEnabled: isPeerEnabled,
                                 interaction: interaction
                             )

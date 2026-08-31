@@ -1367,6 +1367,7 @@ public protocol SharedAccountContext: AnyObject {
     var networkArguments: NetworkInitializationArguments { get }
     var mainWindow: Window1? { get }
     var accountManager: AccountManager<TelegramAccountManagerTypes> { get }
+    var doubleBottomPeerPolicy: DoubleBottomPeerPolicy { get }
     var appLockContext: AppLockContext { get }
     
     var currentPresentationData: Atomic<PresentationData> { get }

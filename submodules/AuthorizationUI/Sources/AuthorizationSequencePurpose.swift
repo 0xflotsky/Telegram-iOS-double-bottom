@@ -9,13 +9,13 @@ public enum AuthorizationSequenceDoubleBottomPasswordResult {
 }
 
 public final class AuthorizationSequenceDoubleBottomReentryContext {
-    public let protectedOwnerPeerId: PeerId
+    public let protectedOwnerPeerId: EnginePeer.Id
     public let preservedOwnerAccountId: AccountRecordId
     public let preservedOwnerPhoneNumber: String
     public let verifyPassword: (String) -> Signal<AuthorizationSequenceDoubleBottomPasswordResult, NoError>
 
     public init(
-        protectedOwnerPeerId: PeerId,
+        protectedOwnerPeerId: EnginePeer.Id,
         preservedOwnerAccountId: AccountRecordId,
         preservedOwnerPhoneNumber: String,
         verifyPassword: @escaping (String) -> Signal<AuthorizationSequenceDoubleBottomPasswordResult, NoError>

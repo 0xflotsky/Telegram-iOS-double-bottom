@@ -386,6 +386,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                 }))
             }
         }
+        }
         controller.updateData(countryCode: countryCode, countryName: nil, number: number)
         return controller
     }
@@ -561,7 +562,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                 let _ = strongSelf.engine.auth.setState(state: UnauthorizedAccountState(
                                     isTestingEnvironment: strongSelf.account.testingEnvironment,
                                     masterDatacenterId: strongSelf.account.masterDatacenterId,
-                                    contents: .passwordEntry(hint: "", number: number, code: authorizationCode, suggestReset: false, syncContacts: syncContacts)
+                                    contents: .passwordEntry(hint: "", number: number, code: authorizationCode, suggestReset: false, syncContacts: false)
                                 )).startStandalone()
                                 controller?.animateSuccess()
                             }
@@ -1040,7 +1041,6 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                     }
                 }))
                 }
-            }
             controller.forgot = nil
             controller.reset = nil
             controller.updateData(hint: hint, suggestReset: false)

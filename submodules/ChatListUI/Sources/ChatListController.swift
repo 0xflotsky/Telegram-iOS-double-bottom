@@ -2280,6 +2280,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     private weak var storyTooltip: TooltipScreen?
     fileprivate func maybeDisplayStoryTooltip() {
+        if self.context.sharedContext.doubleBottomPeerPolicy
+        .currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+        return
+        }
         let content = self.updateHeaderContent()
         if content.secondaryContent != nil {
             return

@@ -325,7 +325,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         let doubleBottomContext = DoubleBottomContext(accountManager: accountManager)
         let doubleBottomCredentialStore = DoubleBottomCredentialStore()
         let doubleBottomPrivateStore = DoubleBottomPrivateStore(basePath: basePath)
-        let doubleBottomPolicy = DoubleBottomPolicy(context: doubleBottomContext, privateStore: doubleBottomPrivateStore)
+        let doubleBottomPolicy = DoubleBottomPolicy(context: doubleBottomContext, credentialStore: doubleBottomCredentialStore, privateStore: doubleBottomPrivateStore)
         let doubleBottomProfileUIState = DoubleBottomProfileUIStateContextImpl(privateStore: doubleBottomPrivateStore, policy: doubleBottomPolicy)
         self.doubleBottomContext = doubleBottomContext
         self.doubleBottomCredentialStore = doubleBottomCredentialStore

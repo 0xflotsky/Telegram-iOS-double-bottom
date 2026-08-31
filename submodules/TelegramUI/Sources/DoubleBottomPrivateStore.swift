@@ -96,6 +96,10 @@ public final class DoubleBottomPrivateStore {
         |> map { _ in () }
     }
 
+    var hasPersistedState: Bool {
+        return FileManager.default.fileExists(atPath: self.fileUrl.path)
+    }
+
     public init(basePath: String) {
         let directoryUrl = URL(fileURLWithPath: basePath, isDirectory: true).appendingPathComponent("double-bottom", isDirectory: true)
         self.directoryUrl = directoryUrl

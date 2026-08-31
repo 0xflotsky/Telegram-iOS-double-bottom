@@ -10,6 +10,7 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         let ownerPeerId: Int64?
         let decoyAllowedPeerIds: Set<Int64>
         let isPrivateStoreAvailable: Bool
+        let hasPersistedCredentialState: Bool
     }
 
     private let privateStore: DoubleBottomPrivateStore
@@ -30,6 +31,16 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         |> distinctUntilChanged
     }
 
+    var canUnlockActiveOwner: Bool {
+        let activeAccountPeerId = self.activeAccountPeerIdValue.with { $0 }
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot, snapshot.isPrivateStoreAvailable, let ownerPeerId = snapshot.ownerPeerId, let activeAccountPeerId else {
+                return false
+            }
+            return ownerPeerId == activeAccountPeerId.toInt64()
+        }
+    }
+
     public var currentProfile: Signal<DoubleBottomProfile, NoError> {
         return self.snapshotPromise.get()
         |> map(\.profile)
@@ -41,8 +52,9 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         |> map { _ in () }
     }
 
-    init(context: DoubleBottomContext, privateStore: DoubleBottomPrivateStore) {
+    init(context: DoubleBottomContext, credentialStore: DoubleBottomCredentialStore, privateStore: DoubleBottomPrivateStore) {
         self.privateStore = privateStore
+        let hasPersistedCredentialState = credentialStore.hasPersistedCredentials
 
         let snapshot = combineLatest(
             context.currentProfile,
@@ -57,7 +69,8 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
                     accessState: accessState,
                     ownerPeerId: state.ownerPeerId,
                     decoyAllowedPeerIds: state.decoyAllowedPeerIds,
-                    isPrivateStoreAvailable: true
+                    isPrivateStoreAvailable: true,
+                    hasPersistedCredentialState: hasPersistedCredentialState
                 )
             }
             |> `catch` { _ -> Signal<Snapshot, NoError> in
@@ -66,7 +79,8 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
                     accessState: accessState,
                     ownerPeerId: nil,
                     decoyAllowedPeerIds: Set(),
-                    isPrivateStoreAvailable: false
+                    isPrivateStoreAvailable: false,
+                    hasPersistedCredentialState: hasPersistedCredentialState
                 ))
             }
         }
@@ -118,7 +132,7 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
                 return false
             }
             guard let ownerPeerId = snapshot.ownerPeerId else {
-                return true
+                return !snapshot.hasPersistedCredentialState
             }
             return ownerPeerId == accountPeerId.toInt64() && snapshot.accessState == .unlocked && snapshot.profile == .primary
         }
@@ -149,6 +163,9 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
 
     private static func mode(snapshot: Snapshot, accountPeerId: PeerId) -> DoubleBottomPeerPolicyMode {
         guard snapshot.isPrivateStoreAvailable else {
+            return .secureExited
+        }
+        if snapshot.ownerPeerId == nil && snapshot.hasPersistedCredentialState {
             return .secureExited
         }
         guard let ownerPeerId = snapshot.ownerPeerId else {

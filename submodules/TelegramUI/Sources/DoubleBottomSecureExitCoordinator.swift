@@ -106,6 +106,15 @@ private final class DoubleBottomSecureExitCoveringView: WindowCoveringView {
     func showIncorrectPassword() {
         self.passwordField.text = nil
         self.setVerifying(false)
+        self.errorLabel.text = "Incorrect password"
+        self.errorLabel.isHidden = false
+        self.passwordField.becomeFirstResponder()
+    }
+
+    func showUnavailable() {
+        self.passwordField.text = nil
+        self.setVerifying(false)
+        self.errorLabel.text = "Local data is unavailable"
         self.errorLabel.isHidden = false
         self.passwordField.becomeFirstResponder()
     }
@@ -153,6 +162,9 @@ final class DoubleBottomSecureExitCoordinator {
         self.privateStore = privateStore
         self.policy = policy
         self.profileUIState = profileUIState
+        if (privateStore.hasPersistedState || credentialStore.hasPersistedCredentials), let window {
+            window.privacyCoveringView = self.coveringView
+        }
         self.coveringView.unlock = { [weak self] password in
             self?.verify(password: password)
         }
@@ -210,6 +222,10 @@ final class DoubleBottomSecureExitCoordinator {
     }
 
     private func verify(password: String) {
+        guard self.policy.canUnlockActiveOwner else {
+            self.coveringView.showUnavailable()
+            return
+        }
         self.verificationDisposable.set((self.credentialStore.verify(password: password)
         |> deliverOnMainQueue).startStrict(next: { [weak self] result in
             guard let self else {
@@ -222,8 +238,11 @@ final class DoubleBottomSecureExitCoordinator {
                 profile = .primary
             case .decoy:
                 profile = .decoy
-            case .invalid, .notConfigured, .unavailable:
+            case .invalid:
                 self.coveringView.showIncorrectPassword()
+                return
+            case .notConfigured, .unavailable:
+                self.coveringView.showUnavailable()
                 return
             }
 

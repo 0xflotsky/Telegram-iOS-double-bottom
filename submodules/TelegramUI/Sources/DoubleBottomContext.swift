@@ -10,7 +10,7 @@ public enum DoubleBottomAccessState: Equatable {
 public final class DoubleBottomContext {
     private let accountManager: AccountManager<TelegramAccountManagerTypes>
     private let currentProfilePromise = Promise<DoubleBottomProfile>()
-    private let accessStatePromise = ValuePromise<DoubleBottomAccessState>(.unlocked, ignoreRepeated: true)
+    private let accessStatePromise = ValuePromise<DoubleBottomAccessState>(.secureExited, ignoreRepeated: true)
 
     public var currentProfile: Signal<DoubleBottomProfile, NoError> {
         return self.currentProfilePromise.get()

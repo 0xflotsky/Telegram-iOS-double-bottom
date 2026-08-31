@@ -52,6 +52,11 @@ public final class DoubleBottomCredentialStore {
     public init() {
     }
 
+    var hasPersistedCredentials: Bool {
+        let status = SecItemCopyMatching(self.keychainQuery() as CFDictionary, nil)
+        return status != errSecItemNotFound
+    }
+
     public func status() -> Signal<DoubleBottomCredentialStoreStatus, NoError> {
         return Signal { subscriber in
             let status: DoubleBottomCredentialStoreStatus

@@ -510,16 +510,25 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         self.filterDisposable.set((combineLatest(queue: .mainQueue(),
             filterItems,
             self.context.account.postbox.peerView(id: self.context.account.peerId),
-            self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false))
+            self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false)),
+            self.context.sharedContext.doubleBottomPeerPolicy.updates
         )
-        |> deliverOnMainQueue).start(next: { [weak self] countAndFilterItems, peerView, limits in
+        |> deliverOnMainQueue).start(next: { [weak self] countAndFilterItems, peerView, limits, _ in
             guard let strongSelf = self else {
                 return
             }
             
             let isPremium = peerView.peers[peerView.peerId]?.isPremium
             
-            let (_, items) = countAndFilterItems
+            var (_, items) = countAndFilterItems
+            if strongSelf.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: strongSelf.context.account.peerId) == .decoy {
+                items = items.filter { item in
+                    if case .allChats = item.0 {
+                        return true
+                    }
+                    return false
+                }
+            }
             var filterItems: [ChatListFilterTabEntry] = []
             
             for (filter, unreadCount, hasUnmutedUnread) in items {
@@ -640,6 +649,8 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
             let updatedFilter: ChatListFilter?
             switch id {
             case .all:
+                updatedFilter = nil
+            case .localFolder:
                 updatedFilter = nil
             case let .filter(id):
                 var found = false

@@ -9,6 +9,7 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         let accessState: DoubleBottomAccessState
         let ownerPeerId: Int64?
         let decoyAllowedPeerIds: Set<Int64>
+        let decoySelectedFolderPeerIds: Set<Int64>?
         let isPrivateStoreAvailable: Bool
         let hasPersistedCredentialState: Bool
     }
@@ -69,6 +70,9 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
                     accessState: accessState,
                     ownerPeerId: state.ownerPeerId,
                     decoyAllowedPeerIds: state.decoyAllowedPeerIds,
+                    decoySelectedFolderPeerIds: state.decoySelectedFolderId.flatMap { selectedFolderId in
+                        return state.decoyFolders.first(where: { $0.id == selectedFolderId })?.peerIds
+                    },
                     isPrivateStoreAvailable: true,
                     hasPersistedCredentialState: hasPersistedCredentialState
                 )
@@ -79,6 +83,7 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
                     accessState: accessState,
                     ownerPeerId: nil,
                     decoyAllowedPeerIds: Set(),
+                    decoySelectedFolderPeerIds: nil,
                     isPrivateStoreAvailable: false,
                     hasPersistedCredentialState: hasPersistedCredentialState
                 ))
@@ -165,7 +170,13 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
             case .secureExited:
                 return Set()
             case .decoy:
-                return Set(snapshot.decoyAllowedPeerIds.map(PeerId.init))
+                let peerIds: Set<Int64>
+                if let selectedFolderPeerIds = snapshot.decoySelectedFolderPeerIds {
+                    peerIds = snapshot.decoyAllowedPeerIds.intersection(selectedFolderPeerIds)
+                } else {
+                    peerIds = snapshot.decoyAllowedPeerIds
+                }
+                return Set(peerIds.map(PeerId.init))
             }
         }
     }

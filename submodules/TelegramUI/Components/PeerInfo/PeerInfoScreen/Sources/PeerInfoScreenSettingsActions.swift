@@ -86,7 +86,12 @@ extension PeerInfoScreenNode {
                 }
             })
         case .chatFolders:
-            let controller = self.context.sharedContext.makeFilterSettingsController(context: self.context, modal: false, scrollToTags: false, dismissed: nil)
+            let controller: ViewController
+            if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+                controller = self.context.sharedContext.makeDoubleBottomLocalFoldersController(context: self.context)
+            } else {
+                controller = self.context.sharedContext.makeFilterSettingsController(context: self.context, modal: false, scrollToTags: false, dismissed: nil)
+            }
             push(controller)
         case .notificationsAndSounds:
             if let settings = self.data?.globalSettings {

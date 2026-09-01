@@ -388,6 +388,8 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
                 filterId = nil
             case let .filter(filter):
                 filterId = filter
+            case .localFolder:
+                filterId = nil
             }
             return (state, filterId)
         })
@@ -1528,17 +1530,24 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                                 return index
                             }
                             index += 1
+                        case .localFolder:
+                            if entry.id == id {
+                                return index
+                            }
+                            index += 1
                         }
                     }
                     return nil
                 }
 
                 let selectedTab: HorizontalTabsComponent.Tab.Id
-                switch self.effectiveContainerNode.currentItemFilter {
+                switch self.controller?.currentTabId ?? self.effectiveContainerNode.currentItemFilter {
                 case .all:
                     selectedTab = AnyHashable(Int32.min)
                 case let .filter(id):
                     selectedTab = AnyHashable(id)
+                case let .localFolder(id):
+                    selectedTab = AnyHashable("double-bottom-local-folder:\(id)")
                 }
                 
                 let isEditing = self.isReorderingFilters || (self.mainContainerNode.currentItemNode.currentState.editing && !self.didBeginSelectingChatsWhileEditing)
@@ -1565,6 +1574,9 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                                     isAccent: unread.hasUnmuted
                                 )
                             }
+                        case let .localFolder(idValue, text):
+                            id = AnyHashable("double-bottom-local-folder:\(idValue)")
+                            title = HorizontalTabsComponent.Tab.Title(text: text, entities: [], enableAnimations: false)
                         }
                         
                         return HorizontalTabsComponent.Tab(
@@ -1623,6 +1635,8 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                                     mappedId = nil
                                 case let .filter(idValue, _, _):
                                     mappedId = idValue
+                                case .localFolder:
+                                    mappedId = nil
                                 }
                                 
                                 var isDisabled = false
@@ -2035,6 +2049,8 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                         folder = (id, text.text)
                     }
                 }
+            case .localFolder:
+                break
             }
         }
         

@@ -3198,6 +3198,10 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     public func makeFilterSettingsController(context: AccountContext, modal: Bool, scrollToTags: Bool, dismissed: (() -> Void)?) -> ViewController {
         return chatListFilterPresetListController(context: context, mode: modal ? .modal : .default, scrollToTags: scrollToTags, dismissed: dismissed)
     }
+
+    public func makeDoubleBottomLocalFoldersController(context: AccountContext) -> ViewController {
+        return DoubleBottomLocalFoldersController(context: context, sharedContext: self)
+    }
     
     public func makeBusinessSetupScreen(context: AccountContext) -> ViewController {
         return PremiumIntroScreen(context: context, mode: .business, source: .settings, modal: false, forceDark: false)

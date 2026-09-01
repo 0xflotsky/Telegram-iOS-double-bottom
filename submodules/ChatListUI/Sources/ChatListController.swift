@@ -158,6 +158,16 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     private let isReorderingTabsValue = ValuePromise<Bool>(false)
     
     private(set) var tabContainerData: ([ChatListFilterTabEntry], Bool, Int32?)?
+    var currentTabId: ChatListFilterTabEntryId {
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            let state = self.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+            if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }) {
+                return .localFolder(selectedFolderId)
+            }
+            return .all
+        }
+        return self.chatListDisplayNode.mainContainerNode.currentItemFilter
+    }
     var hasTabs: Bool {
         if let tabContainerData = self.tabContainerData {
             let isEmpty = tabContainerData.0.count <= 1 || tabContainerData.1
@@ -959,6 +969,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     }
     
     func tabContextGesture(id: Int32?, sourceNode: ContextExtractedContentContainingNode?, sourceView: ContextExtractedContentContainingView?, gesture: ContextGesture?, keepInPlace: Bool, isDisabled: Bool) {
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            self.openFilterSettings()
+            return
+        }
         let context = self.context
         let filterPeersAreMuted: Signal<(areMuted: Bool, peerIds: [EnginePeer.Id])?, NoError> = self.context.engine.peers.currentChatListFilters()
         |> take(1)
@@ -3627,6 +3641,11 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     private var skipTabContainerUpdate = false
     fileprivate func reorderingDonePressed() -> Bool {
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            self.chatListDisplayNode.isReorderingFilters = false
+            self.isReorderingTabsValue.set(false)
+            return false
+        }
         guard let defaultFilters = self.tabContainerData else {
             return false
         }
@@ -3637,6 +3656,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 return 0
             case let .filter(id, _, _):
                 return id
+            case .localFolder:
+                return nil
             }
         }
         let _ = defaultFilterIds
@@ -4002,9 +4023,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             filterItems,
             self.context.account.postbox.peerView(id: self.context.account.peerId),
             self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false)),
-            self.context.sharedContext.doubleBottomPeerPolicy.updates
+            self.context.sharedContext.doubleBottomPeerPolicy.updates,
+            self.context.sharedContext.doubleBottomProfileUIState.updates
         )
-        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits, _ in
+        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits, _, _ in
             guard let strongSelf = self else {
                 return
             }
@@ -4014,7 +4036,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             
             var (_, items) = countAndFilterItems
             let mode = strongSelf.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: strongSelf.context.account.peerId)
-            if mode != .ordinary && mode != .primary {
+            if mode == .secureExited {
                 items = items.filter { item in
                     if case .allChats = item.0 {
                         return true
@@ -4037,6 +4059,14 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         filterItems.append(.filter(id: id, text: title, unread: ChatListFilterTabEntryUnreadCount(value: unreadCount, hasUnmuted: hasUnmutedUnread)))
                 }
             }
+
+            if mode == .decoy {
+                let state = strongSelf.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+                filterItems = [.all(unreadCount: 0)]
+                filterItems.append(contentsOf: state.folders.map { folder in
+                    return .localFolder(id: folder.id, text: folder.title)
+                })
+            }
             
             var resolvedItems = filterItems
             if case .chatList(.root) = strongSelf.location {
@@ -4044,16 +4074,25 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 resolvedItems = []
             }
             
-            let firstItem = items.first?.0 ?? .allChats
             let firstItemEntryId: ChatListFilterTabEntryId
-            switch firstItem {
-                case .allChats:
+            if mode == .decoy {
+                let state = strongSelf.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+                if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }) {
+                    firstItemEntryId = .localFolder(selectedFolderId)
+                } else {
                     firstItemEntryId = .all
-                case let .filter(id, _, _, _):
-                    firstItemEntryId = .filter(id)
+                }
+            } else {
+                let firstItem = items.first?.0 ?? .allChats
+                switch firstItem {
+                    case .allChats:
+                        firstItemEntryId = .all
+                    case let .filter(id, _, _, _):
+                        firstItemEntryId = .filter(id)
+                }
             }
-            
-            var selectedEntryId = !strongSelf.initializedFilters ? firstItemEntryId : strongSelf.chatListDisplayNode.mainContainerNode.currentItemFilter
+
+            var selectedEntryId = mode == .decoy || !strongSelf.initializedFilters ? firstItemEntryId : strongSelf.chatListDisplayNode.mainContainerNode.currentItemFilter
             var resetCurrentEntry = false
             if !resolvedItems.contains(where: { $0.id == selectedEntryId }) {
                 resetCurrentEntry = true
@@ -4075,21 +4114,26 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     selectedEntryId = .all
                 }
             }
-            let filtersLimit = isPremium == false ? limits.maxFoldersCount : nil
+            let filtersLimit = mode == .decoy ? nil : (isPremium == false ? limits.maxFoldersCount : nil)
             strongSelf.tabContainerData = (resolvedItems, false, filtersLimit)
             var availableFilters: [ChatListContainerNodeFilter] = []
             var hasAllChats = false
-            for item in items {
-                switch item.0 {
-                    case .allChats:
-                        hasAllChats = true
-                        if let isPremium = isPremium, !isPremium && availableFilters.count > 0 {
-                            availableFilters.insert(.all, at: 0)
-                        } else {
-                            availableFilters.append(.all)
-                        }
-                    case .filter:
-                        availableFilters.append(.filter(item.0))
+            if mode == .decoy {
+                hasAllChats = true
+                availableFilters = [.all]
+            } else {
+                for item in items {
+                    switch item.0 {
+                        case .allChats:
+                            hasAllChats = true
+                            if let isPremium = isPremium, !isPremium && availableFilters.count > 0 {
+                                availableFilters.insert(.all, at: 0)
+                            } else {
+                                availableFilters.append(.all)
+                            }
+                        case .filter:
+                            availableFilters.append(.filter(item.0))
+                    }
                 }
             }
             if !hasAllChats {
@@ -4100,7 +4144,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             if isPremium == nil && items.isEmpty {
                 strongSelf.mainReady.set(strongSelf.chatListDisplayNode.mainContainerNode.currentItemNode.ready)
             } else if !strongSelf.initializedFilters {
-                if selectedEntryId != strongSelf.chatListDisplayNode.mainContainerNode.currentItemFilter {
+                if mode == .decoy {
+                    strongSelf.mainReady.set(strongSelf.chatListDisplayNode.mainContainerNode.currentItemNode.ready)
+                    strongSelf.initializedFilters = true
+                } else if selectedEntryId != strongSelf.chatListDisplayNode.mainContainerNode.currentItemFilter {
                     strongSelf.chatListDisplayNode.mainContainerNode.switchToFilter(id: selectedEntryId, animated: false, completion: { [weak self] in
                         if let strongSelf = self {
                             strongSelf.mainReady.set(strongSelf.chatListDisplayNode.mainContainerNode.currentItemNode.ready)
@@ -4145,6 +4192,25 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 }
             }
         }
+
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            let selectedFolderId: String?
+            switch id {
+            case .all:
+                selectedFolderId = nil
+            case let .localFolder(id):
+                selectedFolderId = id
+            case .filter:
+                selectedFolderId = nil
+            }
+            let currentFolderId = self.context.sharedContext.doubleBottomProfileUIState.currentDecoyState.selectedFolderId
+            if currentFolderId == selectedFolderId {
+                self.scrollToTop?()
+            } else {
+                let _ = self.context.sharedContext.doubleBottomProfileUIState.setSelectedFolderId(selectedFolderId).startStandalone()
+            }
+            return
+        }
         
         let _ = (self.context.engine.peers.currentChatListFilters()
         |> deliverOnMainQueue).startStandalone(next: { [weak self] filters in
@@ -4154,6 +4220,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             let updatedFilter: ChatListFilter?
             switch id {
             case .all:
+                updatedFilter = nil
+            case .localFolder:
                 updatedFilter = nil
             case let .filter(id):
                 var found = false
@@ -6280,6 +6348,12 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     }
     
     private func openFilterSettings() {
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            if let navigationController = self.context.sharedContext.mainWindow?.viewController as? NavigationController {
+                navigationController.pushViewController(self.context.sharedContext.makeDoubleBottomLocalFoldersController(context: self.context))
+            }
+            return
+        }
         self.chatListDisplayNode.mainContainerNode.updateEnableAdjacentFilterLoading(false)
         if let navigationController = self.context.sharedContext.mainWindow?.viewController as? NavigationController {
             let controller = self.context.sharedContext.makeFilterSettingsController(context: self.context, modal: true, scrollToTags: false, dismissed: { [weak self] in
@@ -6294,6 +6368,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     }
     
     override public func tabBarItemContextAction(sourceView: ContextExtractedContentContainingView, gesture: ContextGesture) {
+        if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
+            self.openFilterSettings()
+            return
+        }
         let _ = (combineLatest(queue: .mainQueue(),
             self.context.engine.peers.currentChatListFilters(),
             chatListFilterItems(context: self.context)

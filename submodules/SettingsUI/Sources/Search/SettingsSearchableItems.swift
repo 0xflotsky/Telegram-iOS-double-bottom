@@ -1221,9 +1221,14 @@ private func callSearchableItems(context: AccountContext) -> [SettingsSearchable
 private func chatFoldersSearchableItems(context: AccountContext) -> [SettingsSearchableItem] {
     let icon: SettingsSearchableItemIcon = .chatFolders
     let strings = context.sharedContext.currentPresentationData.with { $0 }.strings
+    let isDoubleBottomDecoy = context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy
     
     let presentChatFoldersSettings: (AccountContext, (SettingsSearchableItemPresentation, ViewController?) -> Void, ChatListFilterPresetListEntryTag?) -> Void = { context, present, itemTag in
-        present(.push, chatListFilterPresetListController(context: context, mode: .default, focusOnItemTag: itemTag))
+        if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+            present(.push, context.sharedContext.makeDoubleBottomLocalFoldersController(context: context))
+        } else {
+            present(.push, chatListFilterPresetListController(context: context, mode: .default, focusOnItemTag: itemTag))
+        }
     }
  
     var items: [SettingsSearchableItem] = []
@@ -1240,6 +1245,9 @@ private func chatFoldersSearchableItems(context: AccountContext) -> [SettingsSea
             }
         )
     )
+    if isDoubleBottomDecoy {
+        return items
+    }
     items.append(
         SettingsSearchableItem(
             id: "folders/edit",

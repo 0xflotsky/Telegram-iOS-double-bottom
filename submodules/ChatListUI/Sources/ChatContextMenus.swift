@@ -107,9 +107,16 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
             }
         }
 
+        let folderFilters: Signal<[ChatListFilter], NoError>
+        if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+            folderFilters = .single([])
+        } else {
+            folderFilters = context.engine.peers.updatedChatListFilters()
+            |> take(1)
+        }
+
         return combineLatest(
-            context.engine.peers.updatedChatListFilters()
-            |> take(1),
+            folderFilters,
             context.engine.peers.getPinnedItemIds(location: location)
         )
         |> mapToSignal { filters, pinnedItemIds -> Signal<[ContextMenuItem], NoError> in
@@ -237,7 +244,7 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                         }
                         
                         var hasRemoveFromFolder = false
-                        if case let .chatList(currentFilter) = source {
+                        if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) != .decoy, case let .chatList(currentFilter) = source {
                             if let currentFilter = currentFilter, case let .filter(id, title, emoticon, data) = currentFilter {
                                 items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_RemoveFromFolder, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/RemoveFromFolder"), color: theme.contextMenu.primaryColor) }, action: { c, _ in
                                     let _ = (context.engine.peers.updateChatListFiltersInteractively { filters in
@@ -265,6 +272,46 @@ func chatContextMenuItems(context: AccountContext, peerId: EnginePeer.Id, promoI
                         }
                         
                         if !hasRemoveFromFolder && peerGroup != nil {
+                            if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) == .decoy {
+                                let localFolders = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.folders
+                                if !localFolders.isEmpty {
+                                    items.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_AddToFolder, icon: { theme in
+                                        return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Folder"), color: theme.contextMenu.primaryColor)
+                                    }, action: { c, _ in
+                                        var updatedItems: [ContextMenuItem] = []
+                                        updatedItems.append(.action(ContextMenuActionItem(text: strings.ChatList_Context_Back, icon: { theme in
+                                            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Back"), color: theme.contextMenu.primaryColor)
+                                        }, iconPosition: .left, action: { c, _ in
+                                            c?.setItems(chatContextMenuItems(context: context, peerId: peerId, promoInfo: promoInfo, source: source, chatListController: chatListController, joined: joined) |> map { ContextController.Items(content: .list($0)) }, minHeight: nil, animated: true)
+                                        })))
+                                        updatedItems.append(.separator)
+                                        for folder in localFolders {
+                                            let isMember = folder.peerIds.contains(peerId)
+                                            updatedItems.append(.action(ContextMenuActionItem(text: folder.title, icon: { theme in
+                                                return generateTintedImage(image: UIImage(bundleImageName: isMember ? "Chat/Context Menu/Check" : "Chat/Context Menu/Folder"), color: theme.contextMenu.primaryColor)
+                                            }, action: { c, _ in
+                                                c?.dismiss(completion: {
+                                                    var folders = context.sharedContext.doubleBottomProfileUIState.currentDecoyState.folders
+                                                    guard let index = folders.firstIndex(where: { $0.id == folder.id }) else {
+                                                        return
+                                                    }
+                                                    var peerIds = folders[index].peerIds
+                                                    if peerIds.remove(peerId) == nil {
+                                                        peerIds.insert(peerId)
+                                                    }
+                                                    folders[index] = DoubleBottomLocalChatFolder(id: folders[index].id, title: folders[index].title, peerIds: peerIds)
+                                                    let _ = context.sharedContext.doubleBottomProfileUIState.setFolders(folders).startStandalone()
+                                                })
+                                            })))
+                                        }
+                                        c?.setItems(.single(ContextController.Items(content: .list(updatedItems), context: context)), minHeight: nil, animated: true)
+                                    })))
+                                    items.append(.separator)
+                                }
+                            }
+                        }
+
+                        if !hasRemoveFromFolder && peerGroup != nil && context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: context.account.peerId) != .decoy {
                             var hasFolders = false
                             
                             for case let .filter(_, _, _, data) in filters {

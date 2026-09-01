@@ -264,7 +264,7 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         case .allowlist:
             self.openAllowlistPicker()
         case .localFolders:
-            self.presentFolderName()
+            self.push(DoubleBottomLocalFoldersController(context: self.context, sharedContext: self.sharedContext))
         case .pinnedAndRecentChats:
             self.presentPinnedAndRecentActions()
         case .showAllChats:
@@ -411,36 +411,6 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         }))
     }
 
-    private func presentFolderName() {
-        let alert = UIAlertController(title: "Local Decoy Folder", message: "This folder exists only inside the Decoy profile.", preferredStyle: .alert)
-        alert.addTextField { field in
-            field.placeholder = "Folder name"
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Next", style: .default, handler: { [weak self, weak alert] _ in
-            guard let self, let title = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
-                return
-            }
-            self.actionDisposable.set((self.sharedContext.doubleBottomPrivateStore.load()
-            |> deliverOnMainQueue).startStandalone(next: { [weak self] state in
-                guard let self, state.ownerPeerId == self.context.account.peerId.toInt64() else {
-                    return
-                }
-                self.openPeerPicker(title: title, selectedPeerIds: []) { [weak self] peerIds in
-                    guard let self else {
-                        return
-                    }
-                    var folders = self.sharedContext.doubleBottomProfileUIState.currentDecoyState.folders
-                    let folder = DoubleBottomLocalChatFolder(id: UUID().uuidString, title: title, peerIds: Set(peerIds))
-                    folders.append(folder)
-                    let _ = (self.sharedContext.doubleBottomProfileUIState.setFolders(folders)
-                    |> then(self.sharedContext.doubleBottomProfileUIState.setSelectedFolderId(folder.id))).startStandalone()
-                }
-            }))
-        }))
-        self.present(alert, animated: true)
-    }
-
     private func openPeerPicker(title: String, selectedPeerIds: Set<PeerId>, completion: @escaping ([PeerId]) -> Void) {
         let controller = self.context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(
             context: self.context,
@@ -490,6 +460,201 @@ final class DoubleBottomSettingsController: ViewController, UITableViewDataSourc
         let alert = UIAlertController(title: "Double Bottom", message: text, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         self.present(alert, animated: true)
+    }
+}
+
+final class DoubleBottomLocalFoldersController: ViewController, UITableViewDataSource, UITableViewDelegate {
+    private let context: AccountContext
+    private unowned let sharedContext: SharedAccountContextImpl
+    private let presentationData: PresentationData
+    private var folders: [DoubleBottomLocalChatFolder] = []
+    private var stateDisposable: Disposable?
+    private let actionDisposable = MetaDisposable()
+    private let pickerDisposable = MetaDisposable()
+
+    private var controllerNode: DoubleBottomSettingsControllerNode {
+        return self.displayNode as! DoubleBottomSettingsControllerNode
+    }
+
+    init(context: AccountContext, sharedContext: SharedAccountContextImpl) {
+        self.context = context
+        self.sharedContext = sharedContext
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        self.presentationData = presentationData
+        super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationTheme: presentationData.theme, presentationStrings: presentationData.strings))
+        self.title = presentationData.strings.ChatList_EditFolders
+        self.folders = sharedContext.doubleBottomProfileUIState.currentDecoyState.folders
+        self.stateDisposable = (sharedContext.doubleBottomProfileUIState.updates
+        |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
+            guard let self else {
+                return
+            }
+            self.folders = sharedContext.doubleBottomProfileUIState.currentDecoyState.folders
+            if self.isNodeLoaded {
+                self.controllerNode.tableView.reloadData()
+            }
+        })
+    }
+
+    required init(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        self.stateDisposable?.dispose()
+        self.actionDisposable.dispose()
+        self.pickerDisposable.dispose()
+    }
+
+    override func loadDisplayNode() {
+        let node = DoubleBottomSettingsControllerNode()
+        node.tableView.dataSource = self
+        node.tableView.delegate = self
+        node.tableView.backgroundColor = self.presentationData.theme.list.blocksBackgroundColor
+        node.tableView.separatorColor = self.presentationData.theme.list.itemBlocksSeparatorColor
+        self.displayNode = node
+        self.displayNodeDidLoad()
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        transition.updateFrame(node: self.displayNode, frame: CGRect(origin: .zero, size: layout.size))
+        self.controllerNode.updateLayout(layout, navigationHeight: self.navigationLayout(layout: layout).navigationFrame.maxY)
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int {
+        return 2
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return section == 0 ? self.folders.count : 1
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        cell.backgroundColor = self.presentationData.theme.list.itemBlocksBackgroundColor
+        cell.textLabel?.textColor = self.presentationData.theme.list.itemPrimaryTextColor
+        cell.detailTextLabel?.textColor = self.presentationData.theme.list.itemSecondaryTextColor
+        if indexPath.section == 0 {
+            let folder = self.folders[indexPath.row]
+            cell.textLabel?.text = folder.title
+            cell.detailTextLabel?.text = "\(folder.peerIds.count)"
+            cell.accessoryType = .disclosureIndicator
+        } else {
+            cell.textLabel?.text = self.presentationData.strings.ChatListFilterList_CreateFolder
+            cell.textLabel?.textColor = self.presentationData.theme.list.itemAccentColor
+        }
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == 0 {
+            self.presentActions(folderId: self.folders[indexPath.row].id)
+        } else {
+            self.presentName(folder: nil)
+        }
+    }
+
+    private func presentActions(folderId: String) {
+        guard let folder = self.folders.first(where: { $0.id == folderId }) else {
+            return
+        }
+        let alert = UIAlertController(title: folder.title, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.ChatListFolder_AddChats, style: .default, handler: { [weak self] _ in
+            self?.openPeerPicker(folderId: folderId, title: folder.title, selectedPeerIds: folder.peerIds)
+        }))
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Edit, style: .default, handler: { [weak self] _ in
+            self?.presentName(folder: folder)
+        }))
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Delete, style: .destructive, handler: { [weak self] _ in
+            guard let self else {
+                return
+            }
+            let updatedFolders = self.folders.filter { $0.id != folderId }
+            let _ = self.sharedContext.doubleBottomProfileUIState.setFolders(updatedFolders).startStandalone()
+        }))
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Cancel, style: .cancel))
+        if let popoverPresentationController = alert.popoverPresentationController {
+            popoverPresentationController.sourceView = self.view
+            popoverPresentationController.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 1.0, height: 1.0)
+        }
+        self.present(alert, animated: true)
+    }
+
+    private func presentName(folder: DoubleBottomLocalChatFolder?) {
+        let alert = UIAlertController(title: folder == nil ? self.presentationData.strings.ChatListFolder_TitleCreate : self.presentationData.strings.ChatListFolder_TitleEdit, message: nil, preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = self.presentationData.strings.ChatListFolder_NamePlaceholder
+            field.text = folder?.title
+        }
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Cancel, style: .cancel))
+        alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Done, style: .default, handler: { [weak self, weak alert] _ in
+            guard let self, let title = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+                return
+            }
+            if let folder {
+                var updatedFolders = self.folders
+                guard let index = updatedFolders.firstIndex(where: { $0.id == folder.id }) else {
+                    return
+                }
+                updatedFolders[index] = DoubleBottomLocalChatFolder(id: folder.id, title: title, peerIds: folder.peerIds)
+                let _ = self.sharedContext.doubleBottomProfileUIState.setFolders(updatedFolders).startStandalone()
+            } else {
+                let folder = DoubleBottomLocalChatFolder(id: UUID().uuidString, title: title, peerIds: Set())
+                var updatedFolders = self.folders
+                updatedFolders.append(folder)
+                let _ = (self.sharedContext.doubleBottomProfileUIState.setFolders(updatedFolders)
+                |> then(self.sharedContext.doubleBottomProfileUIState.setSelectedFolderId(folder.id))).startStandalone()
+            }
+        }))
+        self.present(alert, animated: true)
+    }
+
+    private func openPeerPicker(folderId: String, title: String, selectedPeerIds: Set<PeerId>) {
+        self.actionDisposable.set((self.sharedContext.doubleBottomPrivateStore.load()
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] state in
+            guard let self, state.ownerPeerId == self.context.account.peerId.toInt64() else {
+                return
+            }
+            let allowedPeerIds = state.decoyAllowedPeerIds
+            let controller = self.context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(
+                context: self.context,
+                mode: .chatSelection(ContactMultiselectionControllerMode.ChatSelection(
+                    title: title,
+                    searchPlaceholder: self.presentationData.strings.ChatListFilter_AddChatsSearchPlaceholder,
+                    selectedChats: selectedPeerIds,
+                    additionalCategories: nil,
+                    chatListFilters: nil
+                )),
+                filters: [],
+                isPeerEnabled: { peer in
+                    return allowedPeerIds.contains(peer.id.toInt64())
+                }
+            ))
+            self.pickerDisposable.set((controller.result
+            |> take(1)
+            |> deliverOnMainQueue).startStrict(next: { [weak self, weak controller] result in
+                guard let self, case let .result(rawPeerIds, _) = result else {
+                    return
+                }
+                let peerIds = Set(rawPeerIds.compactMap { value -> PeerId? in
+                    if case let .peer(peerId) = value {
+                        return peerId
+                    }
+                    return nil
+                })
+                var updatedFolders = self.folders
+                guard let index = updatedFolders.firstIndex(where: { $0.id == folderId }) else {
+                    return
+                }
+                let folder = updatedFolders[index]
+                updatedFolders[index] = DoubleBottomLocalChatFolder(id: folder.id, title: folder.title, peerIds: peerIds)
+                let _ = self.sharedContext.doubleBottomProfileUIState.setFolders(updatedFolders).startStandalone()
+                controller?.dismiss()
+            }))
+            self.push(controller)
+        }))
     }
 }
 

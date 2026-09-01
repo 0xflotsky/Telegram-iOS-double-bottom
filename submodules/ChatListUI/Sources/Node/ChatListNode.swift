@@ -2226,17 +2226,11 @@ public final class ChatListNode: ListViewImpl {
             
             let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
             let doubleBottomUIState = context.sharedContext.doubleBottomProfileUIState.currentDecoyState
-            let selectedDecoyFolderPeerIds: Set<EnginePeer.Id>? = doubleBottomUIState.selectedFolderId.flatMap { selectedFolderId in
-                return doubleBottomUIState.folders.first(where: { $0.id == selectedFolderId })?.peerIds
-            }
             var isEmpty = true
             var entries = rawEntries.filter { entry in
                 switch entry {
                 case let .PeerEntry(peerEntry):
                     guard context.sharedContext.doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeerId, peerId: peerEntry.dialogPeerId) else {
-                        return false
-                    }
-                    if context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeerId) == .decoy, let selectedDecoyFolderPeerIds, !selectedDecoyFolderPeerIds.contains(peerEntry.dialogPeerId) {
                         return false
                     }
                 case let .ContactEntry(contactEntry):

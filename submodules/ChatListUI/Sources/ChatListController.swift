@@ -158,11 +158,43 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     private let isReorderingTabsValue = ValuePromise<Bool>(false)
     
     private(set) var tabContainerData: ([ChatListFilterTabEntry], Bool, Int32?)?
+    // These synthetic ids are scoped to the tab presentation model. They are never
+    // converted into ChatListFilter values or passed to Telegram folder APIs.
+    private var decoyFolderPresentationIds: [String: Int32] = [:]
+    private var decoyFolderIdsByPresentationId: [Int32: String] = [:]
+
+    private func updateDecoyFolderPresentationIds(_ folders: [DoubleBottomLocalChatFolder]) {
+        var presentationIds: [String: Int32] = [:]
+        var folderIds: [Int32: String] = [:]
+        for folder in folders {
+            if let presentationId = self.decoyFolderPresentationIds[folder.id] {
+                presentationIds[folder.id] = presentationId
+                folderIds[presentationId] = folder.id
+            }
+        }
+
+        var candidate = Int32.min + 1
+        for folder in folders {
+            if presentationIds[folder.id] != nil {
+                continue
+            }
+            while folderIds[candidate] != nil {
+                candidate += 1
+            }
+            presentationIds[folder.id] = candidate
+            folderIds[candidate] = folder.id
+            candidate += 1
+        }
+
+        self.decoyFolderPresentationIds = presentationIds
+        self.decoyFolderIdsByPresentationId = folderIds
+    }
+
     var currentTabId: ChatListFilterTabEntryId {
         if self.context.sharedContext.doubleBottomPeerPolicy.currentMode(accountPeerId: self.context.account.peerId) == .decoy {
             let state = self.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
-            if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }) {
-                return .localFolder(selectedFolderId)
+            if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }), let presentationId = self.decoyFolderPresentationIds[selectedFolderId] {
+                return .filter(presentationId)
             }
             return .all
         }
@@ -3656,8 +3688,6 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 return 0
             case let .filter(id, _, _):
                 return id
-            case .localFolder:
-                return nil
             }
         }
         let _ = defaultFilterIds
@@ -4062,9 +4092,17 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
 
             if mode == .decoy {
                 let state = strongSelf.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+                strongSelf.updateDecoyFolderPresentationIds(state.folders)
                 filterItems = [.all(unreadCount: 0)]
-                filterItems.append(contentsOf: state.folders.map { folder in
-                    return .localFolder(id: folder.id, text: folder.title)
+                filterItems.append(contentsOf: state.folders.compactMap { folder in
+                    guard let presentationId = strongSelf.decoyFolderPresentationIds[folder.id] else {
+                        return nil
+                    }
+                    return .filter(
+                        id: presentationId,
+                        text: ChatFolderTitle(text: folder.title, entities: [], enableAnimations: true),
+                        unread: ChatListFilterTabEntryUnreadCount(value: 0, hasUnmuted: false)
+                    )
                 })
             }
             
@@ -4077,8 +4115,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             let firstItemEntryId: ChatListFilterTabEntryId
             if mode == .decoy {
                 let state = strongSelf.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
-                if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }) {
-                    firstItemEntryId = .localFolder(selectedFolderId)
+                if let selectedFolderId = state.selectedFolderId, state.folders.contains(where: { $0.id == selectedFolderId }), let presentationId = strongSelf.decoyFolderPresentationIds[selectedFolderId] {
+                    firstItemEntryId = .filter(presentationId)
                 } else {
                     firstItemEntryId = .all
                 }
@@ -4198,10 +4236,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             switch id {
             case .all:
                 selectedFolderId = nil
-            case let .localFolder(id):
-                selectedFolderId = id
-            case .filter:
-                selectedFolderId = nil
+            case let .filter(presentationId):
+                selectedFolderId = self.decoyFolderIdsByPresentationId[presentationId]
             }
             let currentFolderId = self.context.sharedContext.doubleBottomProfileUIState.currentDecoyState.selectedFolderId
             if currentFolderId == selectedFolderId {
@@ -4220,8 +4256,6 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             let updatedFilter: ChatListFilter?
             switch id {
             case .all:
-                updatedFilter = nil
-            case .localFolder:
                 updatedFilter = nil
             case let .filter(id):
                 var found = false

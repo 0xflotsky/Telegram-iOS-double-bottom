@@ -650,8 +650,6 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
             switch id {
             case .all:
                 updatedFilter = nil
-            case .localFolder:
-                updatedFilter = nil
             case let .filter(id):
                 var found = false
                 var foundValue: ChatListFilter?

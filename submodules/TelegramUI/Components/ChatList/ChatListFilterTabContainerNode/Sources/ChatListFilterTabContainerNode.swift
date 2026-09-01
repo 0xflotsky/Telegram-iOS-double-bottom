@@ -438,7 +438,6 @@ private final class ItemNode: ASDisplayNode {
 public enum ChatListFilterTabEntryId: Hashable {
     case all
     case filter(Int32)
-    case localFolder(String)
 }
 
 public struct ChatListFilterTabEntryUnreadCount: Equatable {
@@ -454,7 +453,6 @@ public struct ChatListFilterTabEntryUnreadCount: Equatable {
 public enum ChatListFilterTabEntry: Equatable {
     case all(unreadCount: Int)
     case filter(id: Int32, text: ChatFolderTitle, unread: ChatListFilterTabEntryUnreadCount)
-    case localFolder(id: String, text: String)
     
     public var id: ChatListFilterTabEntryId {
         switch self {
@@ -462,8 +460,6 @@ public enum ChatListFilterTabEntry: Equatable {
             return .all
         case let .filter(id, _, _):
             return .filter(id)
-        case let .localFolder(id, _):
-            return .localFolder(id)
         }
     }
     
@@ -473,8 +469,6 @@ public enum ChatListFilterTabEntry: Equatable {
             return ChatFolderTitle(text: strings.ChatList_Tabs_AllChats, entities: [], enableAnimations: true)
         case let .filter(_, text, _):
             return text
-        case let .localFolder(_, text):
-            return ChatFolderTitle(text: text, entities: [], enableAnimations: false)
         }
     }
     
@@ -484,8 +478,6 @@ public enum ChatListFilterTabEntry: Equatable {
             return ChatFolderTitle(text: strings.ChatList_Tabs_All, entities: [], enableAnimations: true)
         case let .filter(_, text, _):
             return text
-        case let .localFolder(_, text):
-            return ChatFolderTitle(text: text, entities: [], enableAnimations: false)
         }
     }
 }
@@ -522,8 +514,6 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
                     return 0
                 case let .filter(id):
                     return id
-                case .localFolder:
-                    return nil
                 }
             }
         }
@@ -822,10 +812,6 @@ public final class ChatListFilterTabContainerNode: ASDisplayNode {
                 if let filtersLimit = filtersLimit {
                     isDisabled = !canReorderAllChats && folderIndex >= filtersLimit
                 }
-                folderIndex += 1
-            case .localFolder:
-                unreadCount = 0
-                unreadHasUnmuted = false
                 folderIndex += 1
             }
             if !wasAdded && (itemNode.unreadCount != 0) != (unreadCount != 0) {

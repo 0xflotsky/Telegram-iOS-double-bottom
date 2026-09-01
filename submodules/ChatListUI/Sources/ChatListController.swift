@@ -4048,15 +4048,30 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     private var initializedFilters = false
     private func reloadFilters(firstUpdate: (() -> Void)? = nil) {
         let filterItems = chatListFilterItems(context: self.context)
+        let decoyUnreadStates = self.context.sharedContext.doubleBottomPeerPolicy.updates
+        |> map { [weak self] _ -> Set<EnginePeer.Id> in
+            guard let self else {
+                return Set()
+            }
+            return self.context.sharedContext.doubleBottomPeerPolicy.decoyAllowedPeerIds(accountPeerId: self.context.account.peerId) ?? Set()
+        }
+        |> distinctUntilChanged
+        |> mapToSignal { [weak self] peerIds -> Signal<[EnginePeer.Id: DoubleBottomPeerUnreadState], NoError> in
+            guard let self else {
+                return .single([:])
+            }
+            return doubleBottomPeerUnreadStates(context: self.context, peerIds: peerIds)
+        }
         var notifiedFirstUpdate = false
         self.filterDisposable.set((combineLatest(queue: .mainQueue(),
             filterItems,
             self.context.account.postbox.peerView(id: self.context.account.peerId),
             self.context.engine.data.get(TelegramEngine.EngineData.Item.Configuration.UserLimits(isPremium: false)),
             self.context.sharedContext.doubleBottomPeerPolicy.updates,
-            self.context.sharedContext.doubleBottomProfileUIState.updates
+            self.context.sharedContext.doubleBottomProfileUIState.updates,
+            decoyUnreadStates
         )
-        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits, _, _ in
+        |> deliverOnMainQueue).startStrict(next: { [weak self] countAndFilterItems, peerView, limits, _, _, decoyUnreadStates in
             guard let strongSelf = self else {
                 return
             }
@@ -4092,16 +4107,31 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
 
             if mode == .decoy {
                 let state = strongSelf.context.sharedContext.doubleBottomProfileUIState.currentDecoyState
+                let allowedPeerIds = strongSelf.context.sharedContext.doubleBottomPeerPolicy.decoyAllowedPeerIds(accountPeerId: strongSelf.context.account.peerId) ?? Set()
+                let unreadSummary: (Set<EnginePeer.Id>) -> ChatListFilterTabEntryUnreadCount = { peerIds in
+                    var count = 0
+                    var hasUnmuted = false
+                    for peerId in peerIds {
+                        if let unreadState = decoyUnreadStates[peerId], unreadState.isUnread {
+                            count += 1
+                            if !unreadState.isMuted {
+                                hasUnmuted = true
+                            }
+                        }
+                    }
+                    return ChatListFilterTabEntryUnreadCount(value: count, hasUnmuted: hasUnmuted)
+                }
                 strongSelf.updateDecoyFolderPresentationIds(state.folders)
-                filterItems = [.all(unreadCount: 0)]
+                filterItems = [.all(unreadCount: unreadSummary(allowedPeerIds).value)]
                 filterItems.append(contentsOf: state.folders.compactMap { folder in
                     guard let presentationId = strongSelf.decoyFolderPresentationIds[folder.id] else {
                         return nil
                     }
+                    let unread = unreadSummary(allowedPeerIds.intersection(folder.peerIds))
                     return .filter(
                         id: presentationId,
                         text: ChatFolderTitle(text: folder.title, entities: [], enableAnimations: true),
-                        unread: ChatListFilterTabEntryUnreadCount(value: 0, hasUnmuted: false)
+                        unread: unread
                     )
                 })
             }

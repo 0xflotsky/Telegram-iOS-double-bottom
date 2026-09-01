@@ -181,6 +181,22 @@ public final class DoubleBottomPolicy: DoubleBottomPeerPolicy {
         }
     }
 
+    public func decoyAllowedPeerIds(accountPeerId: PeerId) -> Set<PeerId>? {
+        return self.snapshotValue.with { snapshot in
+            guard let snapshot else {
+                return Set()
+            }
+            switch Self.mode(snapshot: snapshot, accountPeerId: accountPeerId) {
+            case .ordinary, .primary:
+                return nil
+            case .secureExited:
+                return Set()
+            case .decoy:
+                return Set(snapshot.decoyAllowedPeerIds.map(PeerId.init))
+            }
+        }
+    }
+
     func setActiveAccountPeerId(_ peerId: PeerId?) {
         let previous = self.activeAccountPeerIdValue.swap(peerId)
         if previous != peerId {

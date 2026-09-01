@@ -242,3 +242,74 @@ public func chatListFilterItems(context: AccountContext) -> Signal<(Int, [(ChatL
         }
     }
 }
+
+struct DoubleBottomPeerUnreadState: Equatable {
+    let isUnread: Bool
+    let isMuted: Bool
+}
+
+func doubleBottomPeerUnreadStates(context: AccountContext, peerIds: Set<EnginePeer.Id>) -> Signal<[EnginePeer.Id: DoubleBottomPeerUnreadState], NoError> {
+    if peerIds.isEmpty {
+        return .single([:])
+    }
+
+    let orderedPeerIds = peerIds.sorted(by: { lhs, rhs in
+        return lhs.toInt64() < rhs.toInt64()
+    })
+    let unreadItems = orderedPeerIds.map { peerId in
+        return EngineRawUnreadMessageCountsItem.peer(id: peerId, handleThreads: true)
+    }
+    let globalNotificationsKey: EngineRawPostboxViewKey = .preferences(keys: Set([PreferencesKeys.globalNotifications]))
+    let unreadKey: EngineRawPostboxViewKey = .unreadCounts(items: unreadItems)
+    var keys: [EngineRawPostboxViewKey] = [globalNotificationsKey, unreadKey]
+    keys.append(contentsOf: orderedPeerIds.map { peerId in
+        return .basicPeer(peerId)
+    })
+
+    return context.account.postbox.combinedView(keys: keys)
+    |> map { view -> [EnginePeer.Id: DoubleBottomPeerUnreadState] in
+        guard let unreadCounts = view.views[unreadKey] as? EngineRawUnreadMessageCountsView else {
+            return [:]
+        }
+
+        let globalNotificationSettings: GlobalNotificationSettingsSet
+        if let settingsView = view.views[globalNotificationsKey] as? EngineRawPreferencesView, let settings = settingsView.values[PreferencesKeys.globalNotifications]?.get(GlobalNotificationSettings.self) {
+            globalNotificationSettings = settings.effective
+        } else {
+            globalNotificationSettings = GlobalNotificationSettings.defaultSettings.effective
+        }
+
+        var result: [EnginePeer.Id: DoubleBottomPeerUnreadState] = [:]
+        for entry in unreadCounts.entries {
+            guard case let .peer(peerId, state) = entry, let state, state.isUnread, let peerView = view.views[.basicPeer(peerId)] as? EngineRawBasicPeerView, let peer = peerView.peer else {
+                continue
+            }
+
+            var isMuted = false
+            if let notificationSettings = peerView.notificationSettings as? TelegramPeerNotificationSettings {
+                switch notificationSettings.muteState {
+                case .muted:
+                    isMuted = true
+                case .unmuted:
+                    break
+                case .default:
+                    if peer is TelegramUser {
+                        isMuted = !globalNotificationSettings.privateChats.enabled
+                    } else if peer is TelegramGroup {
+                        isMuted = !globalNotificationSettings.groupChats.enabled
+                    } else if let channel = peer as? TelegramChannel {
+                        switch channel.info {
+                        case .group:
+                            isMuted = !globalNotificationSettings.groupChats.enabled
+                        case .broadcast:
+                            isMuted = !globalNotificationSettings.channels.enabled
+                        }
+                    }
+                }
+            }
+            result[peerId] = DoubleBottomPeerUnreadState(isUnread: true, isMuted: isMuted)
+        }
+        return result
+    }
+    |> distinctUntilChanged
+}

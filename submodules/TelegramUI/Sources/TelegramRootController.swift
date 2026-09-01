@@ -296,6 +296,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         self.dismissMinimizedControllers(animated: false)
         self.popToRoot(animated: false)
         self.chatListController?.deactivateSearch(animated: false)
+        self.rootTabController?.updateIsTabBarHidden(false, transition: .immediate)
         self.openChatsController(activateSearch: false)
     }
     

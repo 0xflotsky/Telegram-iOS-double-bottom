@@ -447,29 +447,35 @@ private func contactListNodeEntries(
     isPeerEnabled: ((EnginePeer) -> Bool)?,
     interaction: ContactListNodeInteraction
 ) -> [ContactListNodeEntry] {
-    let accountPeer = accountPeer.flatMap { peer in
-        return doubleBottomPeerPolicy.canAccess(accountPeerId: peer.id, peerId: peer.id) ? peer : nil
-    }
-    let peers = peers.filter { peer in
+     let peers = peers.filter { peer in
+        guard let accountPeer else {
+            return false
+        }
+
         switch peer {
         case let .peer(peer, _, _):
-            guard let accountPeer else {
-                return false
-            }
-            return doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeer.id, peerId: peer.id)
+            return doubleBottomPeerPolicy.canAccess(
+                accountPeerId: accountPeer.id,
+                peerId: peer.id
+            )
+
         case .deviceContact:
-            guard let accountPeer else {
-                return false
-            }
-            let mode = doubleBottomPeerPolicy.currentMode(accountPeerId: accountPeer.id)
+            let mode = doubleBottomPeerPolicy.currentMode(
+                accountPeerId: accountPeer.id
+            )
             return mode == .ordinary || mode == .primary
         }
     }
+
     let topPeers = topPeers.filter { peer in
         guard let accountPeer else {
             return false
         }
-        return doubleBottomPeerPolicy.canAccess(accountPeerId: accountPeer.id, peerId: peer.id)
+
+        return doubleBottomPeerPolicy.canAccess(
+            accountPeerId: accountPeer.id,
+            peerId: peer.id
+        )
     }
 
     var entries: [ContactListNodeEntry] = []

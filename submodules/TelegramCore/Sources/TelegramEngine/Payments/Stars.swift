@@ -1069,7 +1069,7 @@ public final class StarsContext {
         
         init(flags: Flags, balance: StarsAmount, subscriptions: [Subscription], canLoadMoreSubscriptions: Bool, transactions: [Transaction], canLoadMoreTransactions: Bool, isLoading: Bool) {
             self.flags = flags
-            self.balance = balance
+            self.balance = .zero
             self.subscriptions = subscriptions
             self.canLoadMoreSubscriptions = canLoadMoreSubscriptions
             self.transactions = transactions
@@ -1191,102 +1191,24 @@ private final class StarsTransactionsContextImpl {
     init(account: Account, subject: StarsTransactionsContext.Subject, mode: StarsTransactionsContext.Mode) {
         assert(Queue.mainQueue().isCurrent())
         
-        let currentTransactions: [StarsContext.State.Transaction]
-        
         self.account = account
         switch subject {
         case let .starsTransactionsContext(transactionsContext):
             self.peerId = transactionsContext.peerId
             self.ton = transactionsContext.ton
-            currentTransactions = transactionsContext.currentState?.transactions ?? []
         case let .starsContext(starsContext):
             self.starsContext = starsContext
             self.peerId = starsContext.peerId
             self.ton = starsContext.ton
-            currentTransactions = starsContext.currentState?.transactions ?? []
         case let .peer(peerId, ton):
             self.peerId = peerId
             self.ton = ton
-            currentTransactions = []
         }
         self.mode = mode
         
-        let initialTransactions: [StarsContext.State.Transaction]
-        switch mode {
-        case .all:
-            initialTransactions = currentTransactions
-        case .incoming:
-            initialTransactions = currentTransactions.filter { $0.count.amount > StarsAmount.zero }
-        case .outgoing:
-            initialTransactions = currentTransactions.filter { $0.count.amount < StarsAmount.zero }
-        }
-        
-        self._state = StarsTransactionsContext.State(transactions: initialTransactions, canLoadMore: true, isLoading: false)
+        self._state = StarsTransactionsContext.State(transactions: [], canLoadMore: false, isLoading: false)
         self._statePromise.set(.single(self._state))
-        
-        if case let .starsTransactionsContext(transactionsContext) = subject {
-            self.stateDisposable = (transactionsContext.state
-            |> deliverOnMainQueue).start(next: { [weak self] state in
-                guard let self else {
-                    return
-                }
-                let currentTransactions = state.transactions
-                let filteredTransactions: [StarsContext.State.Transaction]
-                switch mode {
-                case .all:
-                    filteredTransactions = currentTransactions
-                case .incoming:
-                    filteredTransactions = currentTransactions.filter { $0.count.amount > StarsAmount.zero }
-                case .outgoing:
-                    filteredTransactions = currentTransactions.filter { $0.count.amount < StarsAmount.zero }
-                }
-                
-                if !filteredTransactions.isEmpty && self._state.transactions.isEmpty  && filteredTransactions != initialTransactions {
-                    var updatedState = self._state
-                    updatedState.transactions.removeAll(where: { $0.flags.contains(.isLocal) })
-                    for transaction in filteredTransactions.reversed() {
-                        updatedState.transactions.insert(transaction, at: 0)
-                    }
-                    self.updateState(updatedState)
-                }
-            })
-        } else if case let .starsContext(starsContext) = subject {
-            self.stateDisposable = (starsContext.state
-            |> deliverOnMainQueue).start(next: { [weak self] state in
-                guard let self, let state else {
-                    return
-                }
-                
-                let currentTransactions = state.transactions
-                let filteredTransactions: [StarsContext.State.Transaction]
-                switch mode {
-                case .all:
-                    filteredTransactions = currentTransactions
-                case .incoming:
-                    filteredTransactions = currentTransactions.filter { $0.count.amount > StarsAmount.zero }
-                case .outgoing:
-                    filteredTransactions = currentTransactions.filter { $0.count.amount < StarsAmount.zero }
-                }
-                
-                if filteredTransactions != initialTransactions {
-                    var existingIds = Set<String>()
-                    for transaction in self._state.transactions {
-                        if !transaction.flags.contains(.isLocal) {
-                            existingIds.insert(transaction.id)
-                        }
-                    }
-                    
-                    var updatedState = self._state
-                    updatedState.transactions.removeAll(where: { $0.flags.contains(.isLocal) })
-                    for transaction in filteredTransactions.reversed() {
-                        if !existingIds.contains(transaction.id) {
-                            updatedState.transactions.insert(transaction, at: 0)
-                        }
-                    }
-                    self.updateState(updatedState)
-                }
-            })
-        }
+        self.nextOffset = nil
     }
     
     deinit {
@@ -1296,39 +1218,7 @@ private final class StarsTransactionsContextImpl {
     }
     
     func loadMore(reload: Bool = false) {
-        assert(Queue.mainQueue().isCurrent())
-        
-        if reload {
-            self.nextOffset = ""
-        }
-        
-        guard !self._state.isLoading, let nextOffset = self.nextOffset else {
-            return
-        }
-        
-        var updatedState = self._state
-        updatedState.isLoading = true
-        self.updateState(updatedState)
-                
-        self.disposable.set((_internal_requestStarsState(account: self.account, peerId: self.peerId, ton: self.ton, mode: self.mode, subscriptionId: nil, offset: nextOffset, limit: self.nextOffset == "" ? 25 : 50)
-        |> deliverOnMainQueue).start(next: { [weak self] status in
-            guard let self else {
-                return
-            }
-            self.nextOffset = status.nextTransactionsOffset
-            
-            var updatedState = self._state
-            updatedState.transactions = nextOffset.isEmpty ? status.transactions : updatedState.transactions + status.transactions
-            updatedState.isLoading = false
-            updatedState.canLoadMore = self.nextOffset != nil
-            self.updateState(updatedState)
-            
-            if case .all = self.mode, nextOffset.isEmpty {
-                self.starsContext?.updateBalance(status.balance, transactions: status.transactions)
-            } else {
-                self.starsContext?.updateBalance(status.balance, transactions: nil)
-            }
-        }))
+    assert(Queue.mainQueue().isCurrent())
     }
     
     private func updateState(_ state: StarsTransactionsContext.State) {
@@ -1436,17 +1326,18 @@ private final class StarsSubscriptionsContextImpl {
     
     init(account: Account, starsContext: StarsContext?, missingBalance: Bool) {
         assert(Queue.mainQueue().isCurrent())
-        
         self.account = account
         self.missingBalance = missingBalance
-        
-        let currentSubscriptions = starsContext?.currentState?.subscriptions ?? []
-        let canLoadMore = starsContext?.currentState?.canLoadMoreSubscriptions ?? true
-        
-        self._state = StarsSubscriptionsContext.State(balance: StarsAmount.zero, subscriptions: currentSubscriptions, canLoadMore: canLoadMore, isLoading: false)
+
+        self._state = StarsSubscriptionsContext.State(
+        balance: .zero,
+        subscriptions: [],
+        canLoadMore: false,
+        isLoading: false
+        )
         self._statePromise.set(.single(self._state))
-        
-        self.loadMore()
+
+        self.nextOffset = nil
     }
     
     deinit {
@@ -1545,8 +1436,8 @@ public final class StarsSubscriptionsContext {
         public var isLoading: Bool
         
         init(balance: StarsAmount, subscriptions: [StarsContext.State.Subscription], canLoadMore: Bool, isLoading: Bool) {
-            self.balance = balance
-            self.subscriptions = subscriptions
+            self.balance = .zero
+            self.subscriptions = []
             self.canLoadMore = canLoadMore
             self.isLoading = isLoading
         }
